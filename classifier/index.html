@@ -3,45 +3,53 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Smart Waste — Station 01</title>
+<title>SmartSort — Waste Sorting System</title>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
 <header class="bar">
   <div class="brand">
-    <span class="dot"></span>
+    <span class="logo" aria-hidden="true">♻</span>
     <div>
-      <h1>Segregation Admission Control</h1>
-      <p class="sub">Station 01</p>
+      <h1>SmartSort</h1>
+      <p class="brandSub">Waste Sorting System</p>
     </div>
   </div>
+
   <nav class="tabs" role="tablist">
     <button class="tab tab--on" data-view="station" role="tab" aria-selected="true">Bins</button>
     <button class="tab" data-view="circuit" role="tab" aria-selected="false">Circuit</button>
   </nav>
-  <div class="pills">
-    <span id="modelPill" class="pill pill--warn">model: loading…</span>
-    <span id="mqttPill" class="pill pill--warn">broker: connecting…</span>
+
+  <div class="meta">
+    <div class="total">
+      <span class="total__k">Total sorted</span>
+      <span class="total__v" id="totalSorted">0</span>
+    </div>
+    <span class="statusDot statusDot--warn" id="statusDot" title="connecting"></span>
   </div>
 </header>
 
-<!-- ══ station: pick a bin ══════════════════════════════════════════════ -->
+<!-- ══ station ══════════════════════════════════════════════════════════ -->
 <section id="view-station" class="view">
-  <p class="lede">Walk up to a bin and tap it to scan an item.</p>
+  <div class="hero">
+    <h2 class="hero__title">Sort your waste<br><span class="grad">intelligently.</span></h2>
+    <p class="hero__sub">Tap a bin, point your camera at the item, and let the scanner verify it belongs there.</p>
+  </div>
   <div id="binCards" class="binCards"></div>
   <p class="foot-note">
-    Fill levels and lock states come from the ESP32 over MQTT. If the controller
-    stops publishing these grey out rather than showing stale numbers as if live.
+    Capacity and lock state come from the ESP32 over MQTT. With no telemetry the
+    bins grey out rather than showing stale numbers as if they were live.
   </p>
 </section>
 
-<!-- ══ scanner: one bin ═════════════════════════════════════════════════ -->
+<!-- ══ scanner ══════════════════════════════════════════════════════════ -->
 <section id="view-scanner" class="view" hidden>
   <button id="backToBins" class="btn btn--ghost">&larr; All bins</button>
 
   <div class="scanHead">
-    <span id="scanTag" class="scanTag">REC</span>
+    <span id="scanIcon" class="scanIcon" aria-hidden="true">♻</span>
     <div>
       <h2 id="scanTitle" class="scanTitle">Recyclable</h2>
       <p id="scanSub" class="scanSub">Present an item to this bin</p>
@@ -75,9 +83,7 @@
 
       <div class="actions">
         <button id="present" class="btn btn--primary btn--big" disabled>Present item</button>
-        <label class="check">
-          <input type="checkbox" id="autoPresent"> Auto-present when stable
-        </label>
+        <label class="check"><input type="checkbox" id="autoPresent"> Auto-present when stable</label>
       </div>
 
       <details class="manual">
@@ -93,7 +99,7 @@
   </div>
 </section>
 
-<!-- ══ circuit: wiring and raw telemetry ════════════════════════════════ -->
+<!-- ══ circuit ══════════════════════════════════════════════════════════ -->
 <section id="view-circuit" class="view" hidden>
   <div class="circuitHead">
     <div>
@@ -103,7 +109,11 @@
         <code>firmware/smart_bin.ino</code> exactly.
       </p>
     </div>
-    <span id="stationPill" class="pill pill--warn">no telemetry yet</span>
+    <div class="pills">
+      <span id="modelPill" class="pill pill--warn">model: loading…</span>
+      <span id="mqttPill" class="pill pill--warn">broker: connecting…</span>
+      <span id="stationPill" class="pill pill--warn">no telemetry yet</span>
+    </div>
   </div>
 
   <div id="circuitCards" class="binCards"></div>
@@ -151,6 +161,22 @@
     </p>
   </div>
 </footer>
+
+<button id="helpBtn" class="helpBtn" aria-label="How this works">?</button>
+<div id="helpPanel" class="helpPanel" hidden>
+  <h3>How this works</h3>
+  <ol>
+    <li>Tap a bin. Its camera opens.</li>
+    <li>Hold an item to the camera and press <strong>Present item</strong>.</li>
+    <li>The classifier decides, then publishes over MQTT.</li>
+    <li>The ESP32 unlocks that lid only on a match — otherwise it stays locked and the red LED lights.</li>
+  </ol>
+  <p class="helpFoot">
+    Capacity comes from the ultrasonic sensors. A bin at 85% reports FULL and
+    refuses everything, regardless of what you present.
+  </p>
+  <button id="helpClose" class="btn btn--sm">Close</button>
+</div>
 
 <script src="vendor/tf.min.js"></script>
 <script src="vendor/teachablemachine-image.min.js"></script>

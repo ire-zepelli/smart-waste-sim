@@ -27,11 +27,11 @@
 const BINS = ['BIODEGRADABLE', 'RECYCLABLE', 'NON_RECYCLABLE'];
 
 const META = {
-  BIODEGRADABLE:  { short: 'BIO', key: 'bio', name: 'Biodegradable',
+  BIODEGRADABLE:  { short: 'BIO', key: 'bio', name: 'Biodegradable', icon: '🌿',
                     hint: 'Food scraps, peel, garden waste' },
-  RECYCLABLE:     { short: 'REC', key: 'rec', name: 'Recyclable',
+  RECYCLABLE:     { short: 'REC', key: 'rec', name: 'Recyclable', icon: '♻️',
                     hint: 'Bottles, cans, clean paper, glass' },
-  NON_RECYCLABLE: { short: 'NON', key: 'non', name: 'Non-recyclable',
+  NON_RECYCLABLE: { short: 'NON', key: 'non', name: 'Non-recyclable', icon: '🚫',
                     hint: 'Sachets, styrofoam, nappies' },
 };
 const SHORT = Object.fromEntries(BINS.map((b) => [b, META[b].short]));
@@ -61,8 +61,10 @@ const el = {
   log: $('#log'), clearLog: $('#clearLog'),
   modelPill: $('#modelPill'), mqttPill: $('#mqttPill'), stationPill: $('#stationPill'),
   binCards: $('#binCards'), circuitCards: $('#circuitCards'),
-  backToBins: $('#backToBins'), scanTag: $('#scanTag'),
+  backToBins: $('#backToBins'), scanIcon: $('#scanIcon'),
   scanTitle: $('#scanTitle'), scanSub: $('#scanSub'),
+  totalSorted: $('#totalSorted'), statusDot: $('#statusDot'),
+  helpBtn: $('#helpBtn'), helpPanel: $('#helpPanel'), helpClose: $('#helpClose'),
   cfgProvider: $('#cfgProvider'), cfgKey: $('#cfgKey'), cfgGeminiModel: $('#cfgGeminiModel'),
   cfgBroker: $('#cfgBroker'), cfgTopic: $('#cfgTopic'), cfgConf: $('#cfgConf'),
   reconnect: $('#reconnect'),
@@ -84,6 +86,7 @@ const state = {
   bins: Object.fromEntries(BINS.map((b) => [META[b].key, {
     fill: null, gas: null, status: null, lastSeen: 0,
     event: null, reason: null, eventAt: 0, lidOpenUntil: 0,
+    collected: 0,   // ACCEPT events seen this session
   }])),
 };
 
@@ -327,8 +330,8 @@ function openScanner(binClass) {
   state.latest = [];
   state.note = null;
   const m = META[binClass];
-  el.scanTag.textContent = m.short;
-  el.scanTag.dataset.bin = m.key;
+  el.scanIcon.textContent = m.icon;
+  el.scanIcon.parentElement.dataset.tone = m.key;
   el.scanTitle.textContent = m.name;
   el.scanSub.textContent = m.hint;
   renderBars();
@@ -514,20 +517,6 @@ function renderVerdict() {
   el.verdictItem.hidden = !state.note;
 }
 
-function binSvg(key, fillPct, lidOpen, red, green) {
-  const inner = 92, top = 44;
-  const h = Math.max(0, Math.min(100, fillPct ?? 0)) / 100 * inner;
-  return `
-  <svg viewBox="0 0 168 152" class="binSvg" aria-hidden="true">
-    <rect class="binLid" x="20" y="24" width="100" height="12" rx="3"
-          transform="rotate(${lidOpen ? -38 : 0} 21 30)"/>
-    <rect class="binBody" x="24" y="${top - 4}" width="92" height="104" rx="7"/>
-    <rect class="binWaste" x="28" y="${top + inner - h}" width="84" height="${h}" rx="3"/>
-    <circle class="led ${red ? 'led--red' : ''}" cx="140" cy="58" r="8"/>
-    <circle class="led ${green ? 'led--green' : ''}" cx="140" cy="86" r="8"/>
-  </svg>`;
-}
-
 function binView(binClass) {
   const m = META[binClass];
   const s = state.bins[m.key];
@@ -540,38 +529,57 @@ function binView(binClass) {
   return { m, s, seen, stale, live, full, lidOpen };
 }
 
+function capBlock(s, live, full) {
+  return `
+    <div class="cap">
+      <div class="cap__head">
+        <span class="cap__k">Capacity</span>
+        <span class="cap__v">${live ? s.fill + '%' : '—'}</span>
+      </div>
+      <div class="cap__track"><div class="cap__fill" style="width:${live ? s.fill : 0}%"></div></div>
+    </div>`;
+}
+
 function renderBinCards() {
   el.binCards.innerHTML = '';
   for (const binClass of BINS) {
-    const { m, s, seen, stale, live, full, lidOpen } = binView(binClass);
+    const { m, s, seen, stale, live, full } = binView(binClass);
 
     const card = document.createElement('button');
     card.className = 'binCard'
       + (stale || !seen ? ' binCard--stale' : '')
       + (full ? ' binCard--full' : '');
     card.dataset.bin = binClass;
+    card.dataset.tone = m.key;
     card.type = 'button';
 
-    const fillText = live ? `${s.fill}%` : '—';
-    const statusText = !seen ? 'no telemetry'
-      : stale ? 'stale' : full ? 'FULL — not accepting' : 'ready';
+    const state = !seen ? 'awaiting telemetry'
+      : stale ? 'controller silent' : full ? 'full — not accepting' : 'ready to scan';
 
     card.innerHTML = `
-      <div class="binHead">
-        <h3 class="binName">${m.name}</h3>
-        <span class="binTag" data-bin="${m.key}">${m.short}</span>
-      </div>
-      <p class="binHint">${m.hint}</p>
-      ${binSvg(m.key, s.fill, lidOpen, full || !live, live && !full)}
-      <div class="binMeter"><div class="binMeter__fill" style="width:${live ? s.fill : 0}%"></div></div>
-      <div class="binFoot">
-        <span class="binFill">${fillText}</span>
-        <span class="binStatus">${statusText}</span>
-      </div>
-      <span class="binGo">${full ? 'Bin is full' : 'Tap to scan an item'}</span>
-    `;
+      <span class="binCard__icon">${m.icon}</span>
+      <h3 class="binCard__name">${m.name}</h3>
+      <p class="binCard__count">${s.collected} item${s.collected === 1 ? '' : 's'} collected</p>
+      <p class="binCard__hint">${m.hint}</p>
+      ${capBlock(s, live, full)}
+      <span class="binCard__state">${state}</span>`;
     el.binCards.append(card);
   }
+  updateHeader();
+}
+
+function updateHeader() {
+  const total = BINS.reduce((n, b) => n + state.bins[META[b].key].collected, 0);
+  el.totalSorted.textContent = total;
+
+  const connected = !!state.client?.connected;
+  const fresh = BINS.filter((b) => Date.now() - state.bins[META[b].key].lastSeen < STALE_MS).length;
+  let kind = 'bad', why = 'broker offline';
+  if (connected && fresh === 3) { kind = 'ok'; why = 'broker connected, 3/3 bins reporting'; }
+  else if (connected && fresh) { kind = 'warn'; why = `broker connected, ${fresh}/3 bins reporting`; }
+  else if (connected) { kind = 'warn'; why = 'broker connected, no telemetry from the controller'; }
+  el.statusDot.className = `statusDot statusDot--${kind}`;
+  el.statusDot.title = why;
 }
 
 function renderCircuitCards() {
@@ -582,16 +590,14 @@ function renderCircuitCards() {
     const card = document.createElement('div');
     card.className = 'binCard binCard--static'
       + (stale || !seen ? ' binCard--stale' : '') + (full ? ' binCard--full' : '');
+    card.dataset.tone = m.key;
     card.innerHTML = `
-      <div class="binHead">
-        <h3 class="binName">${m.name}</h3>
-        <span class="binTag" data-bin="${m.key}">${m.short}</span>
-      </div>
+      <span class="binCard__icon">${m.icon}</span>
+      <h3 class="binCard__name">${m.name}</h3>
       <p class="binPins">
-        TRIG ${pinLabel(p.trig)} · ECHO ${pinLabel(p.echo)} · SERVO ${pinLabel(p.servo)}<br>
-        LED-R ${pinLabel(p.red)} · LED-G ${pinLabel(p.green)}
+        TRIG ${pinLabel(p.trig)} · ECHO ${pinLabel(p.echo)}<br>
+        SERVO ${pinLabel(p.servo)} · LED ${pinLabel(p.red)}/${pinLabel(p.green)}
       </p>
-      ${binSvg(m.key, s.fill, lidOpen, full || !live, live && !full)}
       <div class="binStats">
         <div class="stat"><span class="stat__k">Fill</span>
           <span class="stat__v ${full ? 'stat__v--bad' : ''}">${live ? s.fill + '%' : '—'}</span></div>
@@ -615,6 +621,7 @@ function renderCircuitCards() {
 
 function renderAll() {
   if (state.view === 'station') renderBinCards();
+  else updateHeader();
   if (state.view === 'circuit') renderCircuitCards();
 }
 
@@ -654,7 +661,7 @@ function onBrokerMessage(topic, buf) {
     s.reason = doc.reason ?? null;
     s.eventAt = Date.now();
     if (doc.fill != null) s.fill = doc.fill;
-    if (doc.event === 'ACCEPT') s.lidOpenUntil = Date.now() + LID_OPEN_MS;
+    if (doc.event === 'ACCEPT') { s.lidOpenUntil = Date.now() + LID_OPEN_MS; s.collected++; }
     if (doc.event === 'FULL') s.status = 'FULL';
     log(`${BY_KEY[key]} ${doc.event}${doc.reason ? ' (' + doc.reason + ')' : ''}`,
         doc.event === 'ACCEPT' ? 'ok' : doc.event ? 'err' : undefined);
@@ -731,7 +738,22 @@ function publishManual(label) {
 
 el.binCards.addEventListener('click', (e) => {
   const card = e.target.closest('.binCard');
-  if (card?.dataset.bin) openScanner(card.dataset.bin);
+  if (!card?.dataset.bin) return;
+  // A full bin refuses everything, so opening its camera would only mislead.
+  if (card.classList.contains('binCard--full')) {
+    log(`${card.dataset.bin} is full — empty it before scanning`, 'err');
+    return;
+  }
+  openScanner(card.dataset.bin);
+});
+
+el.helpBtn.addEventListener('click', () => { el.helpPanel.hidden = !el.helpPanel.hidden; });
+el.helpClose.addEventListener('click', () => { el.helpPanel.hidden = true; });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    if (!el.helpPanel.hidden) el.helpPanel.hidden = true;
+    else if (state.view === 'scanner') showView('station');
+  }
 });
 
 document.querySelectorAll('.tab').forEach((t) =>
