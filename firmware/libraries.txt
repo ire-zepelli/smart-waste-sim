@@ -1,3 +1,5 @@
 PubSubClient
 ESP32Servo
-ArduinoJson
+# v7 renamed StaticJsonDocument -> JsonDocument. Pinning the major version so a
+# v6 resolution cannot silently break the sketch.
+ArduinoJson@^7.0.0

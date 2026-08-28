@@ -25,7 +25,8 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <ESP32Servo.h>
-#include <ArduinoJson.h>
+#include <ArduinoJson.h>   // v7+: uses JsonDocument, not StaticJsonDocument
+#include <time.h>
 
 /* ── configuration ──────────────────────────────────────────────────────── */
 
@@ -75,18 +76,23 @@ const uint8_t PIN_BTN_ITEM = 23;  // presents an item, cycling its class
 
 /* ── bin model ──────────────────────────────────────────────────────────── */
 
+/* Deliberately a plain aggregate: no default member initialisers, no
+ * constructor. Under -std=gnu++11 - which older ESP32 Arduino cores still use -
+ * a struct carrying default member initialisers stops being an aggregate and
+ * the brace-initialised array below would fail to compile. The trailing
+ * members are value-initialised to zero by the aggregate initialiser. */
 struct Bin {
   const char* key;       // topic segment: bio | rec | non
   const char* category;  // BIODEGRADABLE | RECYCLABLE | NON_RECYCLABLE
   uint8_t trig, echo, servoPin, ledRed, ledGreen;
 
   Servo lock;
-  int  fillPct   = 0;
-  bool isFull    = false;
-  bool wasFull   = false;
-  int  samples[5] = {0, 0, 0, 0, 0};
-  uint8_t sampleIdx = 0;
-  bool primed    = false;
+  int  fillPct;
+  bool isFull;
+  bool wasFull;
+  int  samples[5];
+  uint8_t sampleIdx;
+  bool primed;
 };
 
 //                              trig echo servo ledR ledG
