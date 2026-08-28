@@ -53,60 +53,66 @@
     <div id="binCards" class="binCards"></div>
   </section>
 
-  <!-- ══ scanner ══════════════════════════════════════════════════════════ -->
-  <section id="view-scanner" class="view" hidden>
-    <button id="backToBins" class="btn btn--ghost">&larr; All bins</button>
-
-    <div class="scanHead">
-      <span id="scanIcon" class="scanIcon" aria-hidden="true">♻</span>
-      <div>
-        <h2 id="scanTitle" class="scanTitle">Recyclable</h2>
-        <p id="scanSub" class="scanSub">Present an item to this bin</p>
+  <!-- ══ SCANNER MODAL OVERLAY ══════════════════════════════════════════════ -->
+<div id="scanModalOverlay" class="scanModalOverlay" hidden>
+  <div id="scanModalCard" class="scanModalCard" data-tone="bio">
+    
+    <!-- Modal Header -->
+    <div class="scanModalHeader">
+      <div class="scanModalHeadTitle">
+        <span id="scanModalIcon" class="scanModalIcon"></span>
+        <div>
+          <h2 id="scanModalTitle" class="scanModalTitle">BIODEGRADABLE</h2>
+          <p id="scanModalSub" class="scanModalSub">SCAN TO SORT</p>
+        </div>
       </div>
+      <button id="closeScanModal" class="scanModalClose" aria-label="Close modal">&times;</button>
     </div>
 
-    <div class="scanGrid">
-      <div class="panel">
-        <div class="videoWrap">
-          <video id="cam" autoplay playsinline muted></video>
-          <div id="camOverlay" class="camOverlay">
-            <p>Camera is off</p>
-            <button id="startCam" class="btn btn--primary">Start camera</button>
-          </div>
-        </div>
-        <div class="camRow">
-          <select id="camSelect" class="select" aria-label="Camera device"></select>
-          <button id="stopCam" class="btn" disabled>Stop</button>
+    <!-- Camera Viewport / Frame -->
+    <div class="scanViewport">
+      <video id="cam" autoplay playsinline muted></video>
+      
+      <!-- Reticle / Viewfinder Corner Brackets -->
+      <div class="reticle reticle--tl"></div>
+      <div class="reticle reticle--tr"></div>
+      <div class="reticle reticle--bl"></div>
+      <div class="reticle reticle--br"></div>
+
+      <!-- Camera Off / Fallback Overlay -->
+      <div id="camOverlay" class="camOverlay">
+        <div class="camUnavailableBox">
+          <svg class="camIcon" viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+            <circle cx="12" cy="13" r="4"/>
+          </svg>
+          <p class="camUnavailableTitle">Camera unavailable</p>
+          <p class="camUnavailableSub">Grant camera access to scan an item</p>
+          <button id="startCam" class="btnStartCam">Enable Camera</button>
         </div>
       </div>
 
-      <div class="panel">
-        <h3 class="h2">Live classification</h3>
-        <div id="bars" class="bars"></div>
-
-        <div id="verdict" class="verdict verdict--idle">
-          <span class="verdict__label">Waiting</span>
-          <span class="verdict__why">Start the camera</span>
-          <span class="verdict__item" id="verdictItem" hidden></span>
-        </div>
-
-        <div class="actions">
-          <button id="present" class="btn btn--primary btn--big" disabled>Present item</button>
-          <label class="check"><input type="checkbox" id="autoPresent"> Auto-present when stable</label>
-        </div>
-
-        <details class="manual">
-          <summary>Manual override (no camera)</summary>
-          <p class="hint">Publishes a classification without the model. Use if the camera fails mid-demonstration.</p>
-          <div class="manualRow">
-            <button class="btn btn--sm" data-manual="BIODEGRADABLE">BIO</button>
-            <button class="btn btn--sm" data-manual="RECYCLABLE">REC</button>
-            <button class="btn btn--sm" data-manual="NON_RECYCLABLE">NON</button>
-          </div>
-        </details>
-      </div>
+      <!-- Status Indicator at Bottom -->
+      <div class="scanStatusBadge" id="scanStatusBadge">READY</div>
     </div>
-  </section>
+
+    <!-- Action Button -->
+    <div class="scanModalActions">
+      <button id="present" class="btnScanModal">Scan Item</button>
+      <p class="scanModalHint" id="scanModalHint">Point camera at item to identify</p>
+    </div>
+
+    <!-- Hidden compatibility DOM nodes -->
+    <div style="display:none;" aria-hidden="true">
+      <div id="verdict"><span class="verdict__label"></span><span class="verdict__why"></span><span id="verdictItem"></span></div>
+      <div id="bars"></div>
+      <select id="camSelect"></select>
+      <button id="stopCam"></button>
+      <input type="checkbox" id="autoPresent">
+    </div>
+
+  </div>
+</div>
 
   <!-- ══ circuit ══════════════════════════════════════════════════════════ -->
   <section id="view-circuit" class="view" hidden>
@@ -146,15 +152,16 @@
     <div class="footRow">
       <label>Classifier
         <select id="cfgProvider" class="input input--m">
+          <option value="groq">Groq API (Qwen 3.8 vision)</option>
           <option value="gemini">Gemini API (cloud vision)</option>
           <option value="teachable">Teachable Machine (./model/)</option>
           <option value="mobilenet">MobileNet heuristic (untrained)</option>
         </select>
       </label>
-      <label class="geminiOnly">Gemini model
-        <input id="cfgGeminiModel" class="input input--m" value="gemini-2.5-flash">
+      <label class="cloudOnly">Vision model
+        <input id="cfgGeminiModel" class="input input--m" value="qwen/qwen3.8-27b">
       </label>
-      <label class="geminiOnly">API key
+      <label class="cloudOnly">API key
         <input id="cfgKey" class="input" type="password" placeholder="paste key — stored in this browser only">
       </label>
       <label>Min confidence
@@ -165,7 +172,7 @@
       <label>Broker <input id="cfgBroker" class="input" value="ws://broker.hivemq.com:8000/mqtt"></label>
       <label>Topic root <input id="cfgTopic" class="input" value="uc-swm-4d/station01"></label>
       <button id="reconnect" class="btn btn--sm">Reconnect</button>
-      <p class="warn geminiOnly">
+      <p class="warn cloudOnly">
         A key in a web page is readable by anyone using it. Use a restricted key, and never commit it.
       </p>
     </div>

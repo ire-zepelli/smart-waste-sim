@@ -111,8 +111,10 @@ const el = {
   log: $('#log'), clearLog: $('#clearLog'),
   modelPill: $('#modelPill'), mqttPill: $('#mqttPill'), stationPill: $('#stationPill'),
   binCards: $('#binCards'), circuitCards: $('#circuitCards'),
-  backToBins: $('#backToBins'), scanIcon: $('#scanIcon'),
-  scanTitle: $('#scanTitle'), scanSub: $('#scanSub'),
+  scanModalOverlay: $('#scanModalOverlay'), scanModalCard: $('#scanModalCard'),
+  scanModalIcon: $('#scanModalIcon'), scanModalTitle: $('#scanModalTitle'),
+  scanModalSub: $('#scanModalSub'), closeScanModal: $('#closeScanModal'),
+  scanStatusBadge: $('#scanStatusBadge'), scanModalHint: $('#scanModalHint'),
   totalSorted: $('#totalSorted'), statusDot: $('#statusDot'),
   helpBtn: $('#helpBtn'), helpPanel: $('#helpPanel'), helpClose: $('#helpClose'),
   cfgProvider: $('#cfgProvider'), cfgKey: $('#cfgKey'), cfgGeminiModel: $('#cfgGeminiModel'),
@@ -210,7 +212,7 @@ const GEMINI_SCHEMA = {
   required: ['class', 'confidence', 'item', 'reason'],
 };
 
-const GEMINI_PROMPT = `You are the waste classification module of a smart segregation bin in the Philippines.
+const VISION_PROMPT = `You are the waste classification module of a smart segregation bin in the Philippines.
 
 Identify the single most prominent waste item a person is holding up to the bin and classify it into exactly one category:
 
@@ -222,6 +224,17 @@ Identify the single most prominent waste item a person is holding up to the bin 
 Return NO_MATCH rather than guessing. Contamination downgrades an item: a grease-soaked pizza box is BIODEGRADABLE, not RECYCLABLE.
 
 confidence is your own certainty from 0 to 1. item is a two-or-three word name for what you see. reason is one short sentence a student could read aloud during a demonstration.`;
+
+/** Turn a cloud provider's {class, confidence, item, reason} into the internal
+ *  prediction array, and stash the human-readable note for the UI. Shared so
+ *  Gemini and Groq cannot drift apart in how they report a result. */
+function shapePrediction(out) {
+  const label = out.class === 'NO_MATCH' ? 'NO_MATCH' : (normaliseLabel(out.class) || 'NO_MATCH');
+  const p = Math.max(0, Math.min(1, Number(out.confidence) || 0));
+  state.note = out.item ? `${out.item} — ${out.reason || ''}`.trim() : (out.reason || null);
+  const rest = BINS.filter((b) => b !== label);
+  return [{ label, p }, ...rest.map((b) => ({ label: b, p: (1 - p) / rest.length }))];
+}
 
 function loadGemini() {
   return {
@@ -241,7 +254,7 @@ function loadGemini() {
         body: JSON.stringify({
           contents: [{
             parts: [
-              { text: GEMINI_PROMPT },
+              { text: VISION_PROMPT },
               { inline_data: { mime_type: 'image/jpeg', data: captureFrame(video) } },
             ],
           }],
@@ -268,16 +281,65 @@ function loadGemini() {
       let out;
       try { out = JSON.parse(text); }
       catch { throw new Error(`Unparseable response: ${text.slice(0, 120)}`); }
+      return shapePrediction(out);
+    },
+  };
+}
 
-      const label = out.class === 'NO_MATCH' ? 'NO_MATCH' : (normaliseLabel(out.class) || 'NO_MATCH');
-      const p = Math.max(0, Math.min(1, Number(out.confidence) || 0));
-      state.note = out.item ? `${out.item} — ${out.reason}` : out.reason;
+/* Groq. OpenAI-compatible endpoint, so the image goes in the standard
+ * multimodal content array. Verified against this account: api.groq.com
+ * returns access-control-allow-origin:* so a browser can call it directly with
+ * no proxy, and qwen/qwen3.8-27b handles both image input and JSON mode.
+ * qwen3.6-27b does NOT — it fails JSON validation — so do not "upgrade" down. */
+function loadGroq() {
+  return {
+    kind: 'groq',
+    mode: 'ondemand',
+    detail: `Groq · ${el.cfgGeminiModel.value.trim()}`,
+    async predict(video) {
+      const key = el.cfgKey.value.trim();
+      if (!key) throw new Error('No API key. Paste one in the settings bar below.');
+      const model = el.cfgGeminiModel.value.trim() || 'qwen/qwen3.8-27b';
 
-      const rest = BINS.filter((b) => b !== label);
-      return [
-        { label, p },
-        ...rest.map((b) => ({ label: b, p: (1 - p) / rest.length })),
-      ];
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+        body: JSON.stringify({
+          model,
+          temperature: 0,
+          max_tokens: 200,
+          response_format: { type: 'json_object' },
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'text', text: `${VISION_PROMPT}\n\nReply with ONLY this JSON object and nothing else:\n{"class":"BIODEGRADABLE|RECYCLABLE|NON_RECYCLABLE|NO_MATCH","confidence":0.0,"item":"short name","reason":"one sentence"}` },
+              { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${captureFrame(video)}` } },
+            ],
+          }],
+        }),
+      });
+
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        if (res.status === 429) throw new Error('Groq rate limit reached. Wait a moment.');
+        if (res.status === 401) throw new Error('Groq API key rejected.');
+        if (res.status === 404) throw new Error(`Model "${model}" not available on this key.`);
+        throw new Error(`Groq ${res.status}: ${body.slice(0, 160)}`);
+      }
+
+      const json = await res.json();
+      const text = json?.choices?.[0]?.message?.content;
+      if (!text) throw new Error('Empty response from Groq.');
+
+      let out;
+      try { out = JSON.parse(text); }
+      catch {
+        // Some models wrap JSON in prose or a code fence despite json_object mode.
+        const m = text.match(/\{[\s\S]*\}/);
+        if (!m) throw new Error(`Unparseable response: ${text.slice(0, 120)}`);
+        out = JSON.parse(m[0]);
+      }
+      return shapePrediction(out);
     },
   };
 }
@@ -332,11 +394,12 @@ async function initModel() {
   pill(el.modelPill, 'model: loading…', 'warn');
 
   try {
-    if (want === 'gemini') {
-      state.classifier = loadGemini();
+    if (want === 'groq' || want === 'gemini') {
+      state.classifier = want === 'groq' ? loadGroq() : loadGemini();
       const hasKey = !!el.cfgKey.value.trim();
       pill(el.modelPill, `model: ${state.classifier.detail}`, hasKey ? 'ok' : 'warn');
-      log(hasKey ? `${state.classifier.detail} ready` : 'Gemini selected but no API key yet.',
+      log(hasKey ? `${state.classifier.detail} ready`
+                 : `${want === 'groq' ? 'Groq' : 'Gemini'} selected but no API key yet.`,
           hasKey ? 'ok' : 'err');
     } else if (want === 'teachable') {
       state.classifier = await loadTeachableMachine();
@@ -363,9 +426,16 @@ async function initModel() {
 
 function showView(name) {
   state.view = name;
-  for (const v of ['station', 'scanner', 'circuit']) {
-    $(`#view-${v}`).hidden = v !== name;
+  // The scanner is a modal overlay, not a view section, so it is not in this
+  // list. Querying a #view-scanner that no longer exists threw a TypeError and
+  // stopped tab switching dead.
+  for (const v of ['station', 'circuit']) {
+    const node = $(`#view-${v}`);
+    if (node) node.hidden = v !== name;
   }
+  // Switching tabs with the scanner open would otherwise leave it floating
+  // over the wrong view with the camera still live.
+  if (el.scanModalOverlay && !el.scanModalOverlay.hidden) closeScanner();
   document.querySelectorAll('.tab').forEach((t) => {
     const on = (t.dataset.view === 'station' && name !== 'circuit')
             || (t.dataset.view === 'circuit' && name === 'circuit');
@@ -380,14 +450,21 @@ function openScanner(binClass) {
   state.latest = [];
   state.note = null;
   const m = META[binClass];
-  el.scanIcon.textContent = m.icon;
-  el.scanIcon.parentElement.dataset.tone = m.key;
-  el.scanTitle.textContent = m.name;
-  el.scanSub.textContent = m.hint;
+  if (el.scanModalIcon) el.scanModalIcon.innerHTML = m.iconSvg || m.icon;
+  if (el.scanModalCard) el.scanModalCard.dataset.tone = m.key;
+  if (el.scanModalTitle) el.scanModalTitle.textContent = m.name;
+  if (el.scanModalSub) el.scanModalSub.textContent = 'SCAN TO SORT';
+  if (el.scanModalOverlay) el.scanModalOverlay.hidden = false;
+  if (el.scanStatusBadge) el.scanStatusBadge.textContent = 'READY';
   renderBars();
   renderVerdict();
-  showView('scanner');
   startCamera();
+}
+
+function closeScanner() {
+  if (el.scanModalOverlay) el.scanModalOverlay.hidden = true;
+  state.targetBin = null;
+  stopCamera();
 }
 
 /* ── camera ───────────────────────────────────────────────────────────── */
@@ -412,29 +489,31 @@ async function startCamera() {
     return;
   }
   try {
-    const deviceId = el.camSelect.value;
+    const deviceId = el.camSelect ? el.camSelect.value : '';
     state.stream = await navigator.mediaDevices.getUserMedia({
       video: deviceId ? { deviceId: { exact: deviceId } } : { facingMode: 'environment' },
     });
     el.cam.srcObject = state.stream;
     await el.cam.play();
-    el.camOverlay.hidden = true;
-    el.stopCam.disabled = false;
-    el.present.disabled = false;
+    if (el.camOverlay) el.camOverlay.hidden = true;
+    if (el.stopCam) el.stopCam.disabled = false;
+    if (el.present) el.present.disabled = false;
     await listCameras();
     startInference();
+    renderVerdict();
   } catch (e) {
     log(`Camera failed: ${e.message}`, 'err');
+    renderVerdict();
   }
 }
 
 function stopCamera() {
   state.stream?.getTracks().forEach((t) => t.stop());
   state.stream = null;
-  el.cam.srcObject = null;
-  el.camOverlay.hidden = false;
-  el.stopCam.disabled = true;
-  el.present.disabled = true;
+  if (el.cam) el.cam.srcObject = null;
+  if (el.camOverlay) el.camOverlay.hidden = false;
+  if (el.stopCam) el.stopCam.disabled = true;
+  if (el.present) el.present.disabled = true;
   clearInterval(state.inferTimer);
   state.inferTimer = null;
   state.latest = [];
@@ -451,7 +530,7 @@ function startInference() {
   // driven by the Present item button rather than a timer.
   if (state.classifier?.mode !== 'continuous') return;
   state.inferTimer = setInterval(async () => {
-    if (!state.classifier || !state.stream || el.cam.readyState < 2) return;
+    if (!state.classifier || (!state.stream && !el.cam?.srcObject) || el.cam.readyState < 2) return;
     try {
       state.latest = await state.classifier.predict(el.cam);
       renderBars();
@@ -466,12 +545,16 @@ function startInference() {
 async function classifyOnce(note) {
   if (state.busy) return;
   if (!state.classifier) { log('No classifier loaded', 'err'); return; }
-  if (!state.stream || el.cam.readyState < 2) { log('Camera is not running', 'err'); return; }
+  const hasCamera = !!(state.stream || (el.cam && (el.cam.srcObject || el.cam.readyState >= 1)));
+  if (!hasCamera) { log('Camera is not running', 'err'); return; }
 
   state.busy = true;
-  el.present.disabled = true;
-  const original = el.present.textContent;
-  el.present.textContent = 'Classifying…';
+  if (el.present) {
+    el.present.disabled = true;
+    el.present.textContent = 'Scanning…';
+  }
+  renderVerdict();
+
   try {
     state.latest = await state.classifier.predict(el.cam);
     renderBars();
@@ -481,8 +564,12 @@ async function classifyOnce(note) {
     log(`Classification failed: ${e.message}`, 'err');
   } finally {
     state.busy = false;
-    el.present.textContent = original;
-    el.present.disabled = !state.stream;
+    const isLive = !!(state.stream || (el.cam && (el.cam.srcObject || el.cam.readyState >= 1)));
+    if (el.present) {
+      el.present.textContent = 'Scan Item';
+      el.present.disabled = !isLive;
+    }
+    renderVerdict();
   }
 }
 
@@ -493,8 +580,13 @@ function threshold() {
 
 /** The decision the ESP32 is expected to reach, mirrored for the operator. */
 function decide() {
-  if (!state.targetBin) return { verdict: 'IDLE', why: 'Pick a bin' };
-  if (!state.latest.length) return { verdict: 'IDLE', why: 'Waiting for the camera' };
+  if (!state.targetBin) return { verdict: 'IDLE', kind: 'idle', why: 'Pick a bin' };
+  const hasCamera = !!(state.stream || (el.cam && (el.cam.srcObject || el.cam.readyState >= 1)));
+  if (!hasCamera) return { verdict: 'OFF', kind: 'idle', why: 'Camera is off — click Enable Camera' };
+  if (state.busy) return { verdict: 'SCANNING', kind: 'idle', why: 'Analyzing waste item with AI…' };
+  if (!state.latest.length) {
+    return { verdict: 'READY', kind: 'idle', why: 'Point camera at item and tap Scan Item' };
+  }
   const top = state.latest[0];
   if (top.label === 'NO_MATCH') {
     return { verdict: 'NO MATCH', kind: 'nomatch', reason: 'no_item',
@@ -502,14 +594,14 @@ function decide() {
   }
   if (top.p < threshold()) {
     return { verdict: 'NO MATCH', kind: 'nomatch', reason: 'low_confidence',
-             why: `Best guess ${top.label} at ${(top.p * 100).toFixed(0)}%, below ${(threshold() * 100).toFixed(0)}% — lid stays locked` };
+             why: `Best guess ${top.label} at ${(top.p * 100).toFixed(0)}%, below ${(threshold() * 100).toFixed(0)}% threshold — lid stays locked` };
   }
   if (top.label !== state.targetBin) {
     return { verdict: 'REJECT', kind: 'reject', reason: 'class_mismatch',
              why: `Detected ${top.label} at the ${SHORT[state.targetBin]} bin — lid stays locked` };
   }
   return { verdict: 'ACCEPT', kind: 'accept', reason: null,
-           why: `${top.label} at ${(top.p * 100).toFixed(0)}% matches this bin — lid unlocks` };
+           why: `${top.label} at ${(top.p * 100).toFixed(0)}% matches this bin — lid unlocks!` };
 }
 
 function trackStability() {
@@ -520,10 +612,10 @@ function trackStability() {
     state.stableSince = Date.now();
     return;
   }
-  if (!el.autoPresent.checked) return;
+  if (!el.autoPresent?.checked) return;
   const now = Date.now();
   if (now - state.stableSince >= STABLE_MS && now - state.lastAutoPublish >= COOLDOWN_MS) {
-    if (decide().verdict !== 'IDLE') {
+    if (decide().verdict !== 'IDLE' && decide().verdict !== 'READY') {
       state.lastAutoPublish = now;
       publishClassification('auto');
     }
@@ -533,6 +625,7 @@ function trackStability() {
 /* ── rendering ────────────────────────────────────────────────────────── */
 
 function renderBars() {
+  if (!el.bars) return;
   if (!state.latest.length) {
     el.bars.innerHTML = '<p class="empty">No prediction yet.</p>';
     return;
@@ -560,11 +653,27 @@ function renderBars() {
 
 function renderVerdict() {
   const d = decide();
-  el.verdict.className = `verdict verdict--${d.kind || 'idle'}`;
-  el.verdict.querySelector('.verdict__label').textContent = d.verdict;
-  el.verdict.querySelector('.verdict__why').textContent = d.why;
-  el.verdictItem.textContent = state.note || '';
-  el.verdictItem.hidden = !state.note;
+  if (el.verdict) {
+    el.verdict.className = `verdict verdict--${d.kind || 'idle'}`;
+    const lbl = el.verdict.querySelector('.verdict__label');
+    const why = el.verdict.querySelector('.verdict__why');
+    if (lbl) lbl.textContent = d.verdict;
+    if (why) why.textContent = d.why;
+    if (el.verdictItem) {
+      el.verdictItem.textContent = state.note || '';
+      el.verdictItem.hidden = !state.note;
+    }
+  }
+  if (el.scanStatusBadge) {
+    el.scanStatusBadge.textContent = d.verdict;
+    el.scanStatusBadge.dataset.kind = d.kind || 'idle';
+  }
+  // The verdict block is display:none in this layout, so without this the
+  // operator sees a bare ACCEPT/REJECT badge and never learns why. The model's
+  // one-line reason is the most demonstrable part of the whole system.
+  if (el.scanModalHint) {
+    el.scanModalHint.textContent = state.note || d.why || 'Point camera at item to identify';
+  }
 }
 
 function binView(binClass) {
@@ -795,20 +904,25 @@ el.binCards.addEventListener('click', (e) => {
 
 el.helpBtn.addEventListener('click', () => { el.helpPanel.hidden = !el.helpPanel.hidden; });
 el.helpClose.addEventListener('click', () => { el.helpPanel.hidden = true; });
+if (el.closeScanModal) el.closeScanModal.addEventListener('click', closeScanner);
+if (el.scanModalOverlay) {
+  el.scanModalOverlay.addEventListener('click', (e) => {
+    if (e.target === el.scanModalOverlay) closeScanner();
+  });
+}
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if (!el.helpPanel.hidden) el.helpPanel.hidden = true;
-    else if (state.view === 'scanner') showView('station');
+    else if (el.scanModalOverlay && !el.scanModalOverlay.hidden) closeScanner();
   }
 });
 
 document.querySelectorAll('.tab').forEach((t) =>
   t.addEventListener('click', () => showView(t.dataset.view)));
-el.backToBins.addEventListener('click', () => showView('station'));
 
 el.startCam.addEventListener('click', startCamera);
-el.stopCam.addEventListener('click', stopCamera);
-el.camSelect.addEventListener('change', () => { if (state.stream) { stopCamera(); startCamera(); } });
+if (el.stopCam) el.stopCam.addEventListener('click', stopCamera);
+if (el.camSelect) el.camSelect.addEventListener('change', () => { if (state.stream) { stopCamera(); startCamera(); } });
 el.clearLog.addEventListener('click', () => { el.log.innerHTML = ''; });
 el.reconnect.addEventListener('click', connect);
 document.querySelectorAll('[data-manual]').forEach((b) =>
@@ -819,15 +933,48 @@ el.present.addEventListener('click', () => {
   else classifyOnce('present');
 });
 
-const SAVED = ['cfgProvider', 'cfgGeminiModel', 'cfgKey', 'cfgConf', 'cfgBroker', 'cfgTopic'];
+const SAVED = ['cfgProvider', 'cfgConf', 'cfgBroker', 'cfgTopic'];
+
+/* Cloud providers each get their own stored key and model, so switching
+ * between Groq and Gemini does not send one provider's key to the other. */
+const CLOUD = {
+  groq:   { name: 'Groq',   model: 'qwen/qwen3.8-27b' },
+  gemini: { name: 'Gemini', model: 'gemini-2.5-flash' },
+};
+const isCloud = () => !!CLOUD[el.cfgProvider.value];
 
 function applyProviderVisibility() {
-  const gemini = el.cfgProvider.value === 'gemini';
-  document.querySelectorAll('.geminiOnly').forEach((n) => { n.hidden = !gemini; });
-  el.autoPresent.disabled = gemini;
-  el.autoPresent.parentElement.title = gemini
-    ? 'Disabled for Gemini — the free tier allows only 5-15 requests per minute' : '';
-  if (gemini) el.autoPresent.checked = false;
+  const cloud = isCloud();
+  document.querySelectorAll('.cloudOnly').forEach((n) => { n.hidden = !cloud; });
+  if (el.autoPresent) {
+    el.autoPresent.disabled = cloud;
+    if (el.autoPresent.parentElement) {
+      el.autoPresent.parentElement.title = cloud
+        ? 'Disabled for cloud providers — every scan is a metered API call' : '';
+    }
+    if (cloud) el.autoPresent.checked = false;
+  }
+}
+
+/** Swap the key and model fields to whichever cloud provider is selected. */
+function loadProviderCreds() {
+  const p = el.cfgProvider.value;
+  if (!CLOUD[p]) return;
+  try {
+    el.cfgKey.value = localStorage.getItem(`swm.key.${p}`) || '';
+    el.cfgGeminiModel.value = localStorage.getItem(`swm.model.${p}`) || CLOUD[p].model;
+  } catch {
+    el.cfgGeminiModel.value = CLOUD[p].model;
+  }
+}
+
+function saveProviderCreds() {
+  const p = el.cfgProvider.value;
+  if (!CLOUD[p]) return;
+  try {
+    localStorage.setItem(`swm.key.${p}`, el.cfgKey.value);
+    localStorage.setItem(`swm.model.${p}`, el.cfgGeminiModel.value);
+  } catch { /* private mode — the session still works, it just will not persist */ }
 }
 
 function restoreSettings() {
@@ -837,6 +984,7 @@ function restoreSettings() {
       if (v !== null) el[id].value = v;
     } catch { /* private mode or blocked storage — defaults are fine */ }
   }
+  loadProviderCreds();
 }
 
 for (const id of SAVED) {
@@ -845,9 +993,13 @@ for (const id of SAVED) {
   });
 }
 
-el.cfgProvider.addEventListener('change', () => { applyProviderVisibility(); initModel(); });
-el.cfgGeminiModel.addEventListener('change', () => { if (el.cfgProvider.value === 'gemini') initModel(); });
-el.cfgKey.addEventListener('change', () => { if (el.cfgProvider.value === 'gemini') initModel(); });
+el.cfgProvider.addEventListener('change', () => {
+  loadProviderCreds();
+  applyProviderVisibility();
+  initModel();
+});
+el.cfgGeminiModel.addEventListener('change', () => { saveProviderCreds(); if (isCloud()) initModel(); });
+el.cfgKey.addEventListener('change', () => { saveProviderCreds(); if (isCloud()) initModel(); });
 el.cfgTopic.addEventListener('change', () => { if (state.client?.connected) subscribeTelemetry(); });
 
 // Repaint on a timer so staleness and the lid dwell expire on their own.

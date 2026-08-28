@@ -319,7 +319,7 @@ body{
 .input--m{min-width:11rem}
 .warn{margin:0; font-size:.7rem; color:var(--warn); align-self:center;
       max-width:30rem; line-height:1.45}
-.geminiOnly[hidden]{display:none}
+.cloudOnly[hidden]{display:none}
 
 /* ── help ───────────────────────────────────────────────── */
 .helpBtn{
@@ -338,3 +338,140 @@ body{
 .helpPanel h3{margin:0 0 .6rem; font-size:.95rem}
 .helpPanel ol{margin:0; padding-left:1.15rem; font-size:.84rem; color:var(--muted); line-height:1.65}
 .helpFoot{margin:.8rem 0 .9rem; font-size:.78rem; color:var(--muted-2)}
+
+/* ── scanner modal ───────────────────────────────────────── */
+.scanModalOverlay{
+  position:fixed; inset:0; z-index:100;
+  background:rgba(4,7,13,.85); backdrop-filter:blur(10px);
+  display:grid; place-items:center; padding:1rem;
+  animation:fadeIn .2s ease-out;
+}
+.scanModalOverlay[hidden]{display:none !important}
+
+@keyframes fadeIn{from{opacity:0} to{opacity:1}}
+
+.scanModalCard{
+  --tone:var(--bio);
+  --modal-border:rgba(74,222,128,.4);
+  --modal-glow:rgba(74,222,128,.2);
+
+  width:min(440px,100%);
+  background:#090d16;
+  border:1px solid var(--modal-border);
+  border-radius:20px;
+  box-shadow:0 0 45px var(--modal-glow),0 20px 60px rgba(0,0,0,.95);
+  padding:0;
+  display:flex; flex-direction:column;
+  position:relative;
+  overflow:hidden;
+  animation:modalPop .25s cubic-bezier(.34,1.25,.64,1);
+}
+
+#verdict, #bars { display: none !important; }
+
+@keyframes modalPop{from{transform:scale(.92); opacity:0} to{transform:scale(1); opacity:1}}
+
+.scanModalCard[data-tone="bio"]{
+  --tone:#4ade80;
+  --modal-border:rgba(74,222,128,.4);
+  --modal-glow:rgba(74,222,128,.2);
+}
+.scanModalCard[data-tone="rec"]{
+  --tone:#38bdf8;
+  --modal-border:rgba(56,189,248,.4);
+  --modal-glow:rgba(56,189,248,.2);
+}
+.scanModalCard[data-tone="non"]{
+  --tone:#f97316;
+  --modal-border:rgba(249,115,22,.4);
+  --modal-glow:rgba(249,115,22,.2);
+}
+
+.scanModalHeader{
+  display:flex; justify-content:space-between; align-items:center;
+  padding:1.2rem 1.4rem .9rem;
+}
+.scanModalHeadTitle{
+  display:flex; align-items:center; gap:.75rem;
+}
+.scanModalIcon{
+  width:28px; height:28px; display:grid; place-items:center; color:var(--tone);
+}
+.scanModalIcon svg{
+  width:24px; height:24px;
+}
+.scanModalTitle{
+  margin:0; font-size:1.05rem; font-weight:800; color:var(--tone);
+  letter-spacing:.04em; text-transform:uppercase; line-height:1.1;
+}
+.scanModalSub{
+  margin:.15rem 0 0; font-family:var(--mono); font-size:.64rem; font-weight:600;
+  color:#64748b; letter-spacing:.14em; text-transform:uppercase;
+}
+
+.scanModalClose{
+  background:transparent; border:0; color:#64748b;
+  font-size:1.4rem; cursor:pointer; width:30px; height:30px;
+  border-radius:50%; display:grid; place-items:center; transition:.15s;
+}
+.scanModalClose:hover{
+  color:#ffffff; background:rgba(255,255,255,.08);
+}
+
+.scanViewport{
+  position:relative; width:100%; aspect-ratio:1.08 / 1; background:#000000;
+  border-top:1px solid rgba(255,255,255,.06); border-bottom:1px solid rgba(255,255,255,.06);
+  display:flex; align-items:center; justify-content:center;
+}
+
+.reticle{
+  position:absolute; width:28px; height:28px; pointer-events:none; z-index:5;
+}
+.reticle--tl{top:18px; left:18px; border-top:2px solid var(--tone); border-left:2px solid var(--tone)}
+.reticle--tr{top:18px; right:18px; border-top:2px solid var(--tone); border-right:2px solid var(--tone)}
+.reticle--bl{bottom:18px; left:18px; border-bottom:2px solid var(--tone); border-left:2px solid var(--tone)}
+.reticle--br{bottom:18px; right:18px; border-bottom:2px solid var(--tone); border-right:2px solid var(--tone)}
+
+.camUnavailableBox{
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  text-align:center; border:1px solid rgba(255,255,255,.08); border-radius:14px;
+  padding:1.4rem 1rem; background:rgba(9,13,22,.85); width:min(230px,80%);
+}
+.camIcon{color:#475569; margin-bottom:.5rem}
+.camUnavailableTitle{margin:0; font-size:.88rem; font-weight:600; color:#94a3b8}
+.camUnavailableSub{margin:.25rem 0 .75rem; font-family:var(--mono); font-size:.7rem; color:#475569}
+.btnStartCam{
+  background:#1e293b; border:1px solid rgba(255,255,255,.1); color:#f8fafc;
+  font-family:var(--font-sans); font-size:.78rem; font-weight:600;
+  padding:.4rem .85rem; border-radius:8px; cursor:pointer; transition:.15s;
+}
+.btnStartCam:hover{background:#334155}
+
+.scanStatusBadge{
+  position:absolute; bottom:16px; left:50%; transform:translateX(-50%);
+  font-family:var(--mono); font-size:.68rem; font-weight:600; letter-spacing:.12em;
+  color:#525d6d; text-transform:uppercase; z-index:5;
+}
+
+.scanModalActions{
+  padding:1.2rem 1.4rem; display:flex; flex-direction:column; align-items:center; gap:.6rem;
+  background:#090d16;
+}
+.btnScanModal{
+  width:100%; background:var(--tone); color:#04140c;
+  font-family:var(--font-sans); font-size:.95rem; font-weight:700;
+  border:0; border-radius:12px; padding:.85rem; cursor:pointer;
+  box-shadow:0 0 20px color-mix(in srgb,var(--tone) 35%,transparent);
+  transition:transform .15s, box-shadow .15s, opacity .15s;
+}
+.btnScanModal:hover:not(:disabled){
+  transform:translateY(-1px);
+  box-shadow:0 0 25px color-mix(in srgb,var(--tone) 50%,transparent);
+}
+.btnScanModal:disabled{opacity:.4; cursor:not-allowed; transform:none}
+.scanModalHint{margin:0; font-family:var(--mono); font-size:.72rem; color:#525d6d; text-align:center}
+
+/* verdict colour on the scan badge */
+.scanStatusBadge[data-kind="accept"]{color:var(--ok); border-color:var(--ok)}
+.scanStatusBadge[data-kind="reject"]{color:var(--bad); border-color:var(--bad)}
+.scanStatusBadge[data-kind="nomatch"]{color:var(--warn); border-color:var(--warn)}
