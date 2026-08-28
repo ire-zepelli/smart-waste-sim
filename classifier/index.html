@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Smart Waste — Classifier Node</title>
+<title>Smart Waste — Station 01</title>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -13,83 +13,115 @@
     <span class="dot"></span>
     <div>
       <h1>Segregation Admission Control</h1>
-      <p class="sub">Station 01 &middot; classifier node</p>
+      <p class="sub">Station 01</p>
     </div>
   </div>
+  <nav class="tabs" role="tablist">
+    <button class="tab tab--on" data-view="station" role="tab" aria-selected="true">Bins</button>
+    <button class="tab" data-view="circuit" role="tab" aria-selected="false">Circuit</button>
+  </nav>
   <div class="pills">
     <span id="modelPill" class="pill pill--warn">model: loading…</span>
     <span id="mqttPill" class="pill pill--warn">broker: connecting…</span>
   </div>
 </header>
 
-<main>
-  <!-- ── camera ───────────────────────────────────────────── -->
-  <section class="panel panel--cam">
-    <div class="videoWrap">
-      <video id="cam" autoplay playsinline muted></video>
-      <div id="camOverlay" class="camOverlay">
-        <p>Camera is off</p>
-        <button id="startCam" class="btn btn--primary">Start camera</button>
+<!-- ══ station: pick a bin ══════════════════════════════════════════════ -->
+<section id="view-station" class="view">
+  <p class="lede">Walk up to a bin and tap it to scan an item.</p>
+  <div id="binCards" class="binCards"></div>
+  <p class="foot-note">
+    Fill levels and lock states come from the ESP32 over MQTT. If the controller
+    stops publishing these grey out rather than showing stale numbers as if live.
+  </p>
+</section>
+
+<!-- ══ scanner: one bin ═════════════════════════════════════════════════ -->
+<section id="view-scanner" class="view" hidden>
+  <button id="backToBins" class="btn btn--ghost">&larr; All bins</button>
+
+  <div class="scanHead">
+    <span id="scanTag" class="scanTag">REC</span>
+    <div>
+      <h2 id="scanTitle" class="scanTitle">Recyclable</h2>
+      <p id="scanSub" class="scanSub">Present an item to this bin</p>
+    </div>
+  </div>
+
+  <div class="scanGrid">
+    <div class="panel">
+      <div class="videoWrap">
+        <video id="cam" autoplay playsinline muted></video>
+        <div id="camOverlay" class="camOverlay">
+          <p>Camera is off</p>
+          <button id="startCam" class="btn btn--primary">Start camera</button>
+        </div>
+      </div>
+      <div class="camRow">
+        <select id="camSelect" class="select" aria-label="Camera device"></select>
+        <button id="stopCam" class="btn" disabled>Stop</button>
       </div>
     </div>
-    <div class="camRow">
-      <select id="camSelect" class="select" aria-label="Camera device"></select>
-      <button id="stopCam" class="btn" disabled>Stop</button>
-    </div>
-  </section>
 
-  <!-- ── decision ─────────────────────────────────────────── -->
-  <section class="panel panel--decide">
+    <div class="panel">
+      <h3 class="h2">Live classification</h3>
+      <div id="bars" class="bars"></div>
 
-    <h2 class="h2">Presenting to bin</h2>
-    <div class="bins" id="bins" role="radiogroup" aria-label="Target bin">
-      <button class="bin" data-bin="BIODEGRADABLE" role="radio" aria-checked="false">
-        <span class="bin__k">Biodegradable</span><span class="bin__t">BIO</span>
-      </button>
-      <button class="bin" data-bin="RECYCLABLE" role="radio" aria-checked="false">
-        <span class="bin__k">Recyclable</span><span class="bin__t">REC</span>
-      </button>
-      <button class="bin" data-bin="NON_RECYCLABLE" role="radio" aria-checked="false">
-        <span class="bin__k">Non-recyclable</span><span class="bin__t">NON</span>
-      </button>
-    </div>
-
-    <h2 class="h2">Live classification</h2>
-    <div id="bars" class="bars"></div>
-
-    <div id="verdict" class="verdict verdict--idle">
-      <span class="verdict__label">Waiting</span>
-      <span class="verdict__why">Start the camera and pick a bin</span>
-      <span class="verdict__item" id="verdictItem" hidden></span>
-    </div>
-
-    <div class="actions">
-      <button id="present" class="btn btn--primary btn--big" disabled>Present item</button>
-      <label class="check">
-        <input type="checkbox" id="autoPresent"> Auto-present when stable
-      </label>
-    </div>
-
-    <details class="manual">
-      <summary>Manual override (no camera)</summary>
-      <p class="hint">Publishes a classification without the model. Use if the camera fails mid-demonstration.</p>
-      <div class="manualRow">
-        <button class="btn btn--sm" data-manual="BIODEGRADABLE">BIO</button>
-        <button class="btn btn--sm" data-manual="RECYCLABLE">REC</button>
-        <button class="btn btn--sm" data-manual="NON_RECYCLABLE">NON</button>
+      <div id="verdict" class="verdict verdict--idle">
+        <span class="verdict__label">Waiting</span>
+        <span class="verdict__why">Start the camera</span>
+        <span class="verdict__item" id="verdictItem" hidden></span>
       </div>
-    </details>
-  </section>
 
-  <!-- ── telemetry ────────────────────────────────────────── -->
-  <section class="panel panel--log">
+      <div class="actions">
+        <button id="present" class="btn btn--primary btn--big" disabled>Present item</button>
+        <label class="check">
+          <input type="checkbox" id="autoPresent"> Auto-present when stable
+        </label>
+      </div>
+
+      <details class="manual">
+        <summary>Manual override (no camera)</summary>
+        <p class="hint">Publishes a classification without the model. Use if the camera fails mid-demonstration.</p>
+        <div class="manualRow">
+          <button class="btn btn--sm" data-manual="BIODEGRADABLE">BIO</button>
+          <button class="btn btn--sm" data-manual="RECYCLABLE">REC</button>
+          <button class="btn btn--sm" data-manual="NON_RECYCLABLE">NON</button>
+        </div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ══ circuit: wiring and raw telemetry ════════════════════════════════ -->
+<section id="view-circuit" class="view" hidden>
+  <div class="circuitHead">
+    <div>
+      <h2 class="circuitTitle">Station 01 — live circuit</h2>
+      <p class="circuitSub">
+        One ESP32 drives all three bin units. Pin assignments match
+        <code>firmware/smart_bin.ino</code> exactly.
+      </p>
+    </div>
+    <span id="stationPill" class="pill pill--warn">no telemetry yet</span>
+  </div>
+
+  <div id="circuitCards" class="binCards"></div>
+
+  <p class="circuitFoot">
+    Shared: MQ-135 stand-in on <code>GPIO39 / VN</code> (ADC1 — ADC2 is unusable
+    while WiFi is active). Buttons on <code>GPIO27</code> change bin and
+    <code>GPIO23</code> presents an item.
+  </p>
+
+  <div class="panel">
     <div class="logHead">
-      <h2 class="h2">Published</h2>
+      <h3 class="h2">MQTT traffic</h3>
       <button id="clearLog" class="btn btn--sm">Clear</button>
     </div>
     <ol id="log" class="log" aria-live="polite"></ol>
-  </section>
-</main>
+  </div>
+</section>
 
 <footer class="foot">
   <div class="footRow">

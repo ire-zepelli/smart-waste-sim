@@ -1,14 +1,19 @@
-/* Smart Waste Management — classifier node.
+/* Smart Waste Management — station 01 front end.
  *
- * Runs a 3-class waste classifier on the webcam and publishes the result over
- * MQTT. The ESP32 station controller subscribes and decides whether to unlock
- * the lid; this page mirrors the expected decision so the operator sees it too.
+ * Three views:
+ *   station   the three bins with live fill and lock state. Tap one to scan.
+ *   scanner   one bin's camera. Classifies, then publishes over MQTT.
+ *   circuit   pin-level wiring and raw MQTT traffic.
+ *
+ * Bin state is not simulated here. It arrives as telemetry from the ESP32 and
+ * goes stale if the controller stops publishing, rather than showing an old
+ * number as though it were live.
  *
  * Three swappable classifiers, chosen at runtime:
  *
  *   gemini     Cloud vision. Best accuracy on real, deformed, dirty waste and
  *              needs no training. Implements the "image uploads from the
- *              ESP32-CAM" path the project document already specifies (p9).
+ *              ESP32-CAM" path the project document specifies (p9).
  *              On-demand only: the free tier allows 5-15 requests/minute.
  *   teachable  Teachable Machine model in ./model/. Runs offline at ~5fps.
  *              This is the demo-safe fallback when the network dies.
@@ -20,16 +25,90 @@
  */
 
 const BINS = ['BIODEGRADABLE', 'RECYCLABLE', 'NON_RECYCLABLE'];
-const SHORT = { BIODEGRADABLE: 'BIO', RECYCLABLE: 'REC', NON_RECYCLABLE: 'NON' };
 
-const INFER_MS = 200;    // inference cadence
-const STABLE_MS = 1500;  // how long a class must hold before auto-present fires
-const COOLDOWN_MS = 3000; // minimum gap between auto-presents
+const META = {
+  BIODEGRADABLE:  { short: 'BIO', key: 'bio', name: 'Biodegradable',
+                    hint: 'Food scraps, peel, garden waste' },
+  RECYCLABLE:     { short: 'REC', key: 'rec', name: 'Recyclable',
+                    hint: 'Bottles, cans, clean paper, glass' },
+  NON_RECYCLABLE: { short: 'NON', key: 'non', name: 'Non-recyclable',
+                    hint: 'Sachets, styrofoam, nappies' },
+};
+const SHORT = Object.fromEntries(BINS.map((b) => [b, META[b].short]));
+const BY_KEY = Object.fromEntries(BINS.map((b) => [META[b].key, b]));
 
-/* Keyword heuristic mapping ImageNet's 1000 labels onto three waste bins.
- * Deliberately crude. It exists so the page is usable before a model is
- * trained, and it is labelled as a heuristic in the UI so nobody mistakes it
- * for a waste-trained model. Replace it by dropping a real model in ./model/. */
+/* Must stay identical to firmware/smart_bin.ino. */
+const PINS = {
+  bio: { trig: 13, echo: 34, servo: 33, red: 16, green: 17 },
+  rec: { trig: 14, echo: 35, servo: 32, red: 18, green: 19 },
+  non: { trig: 26, echo: 36, servo: 25, red: 21, green: 22 },
+};
+const WOKWI_LABEL = { 16: 'RX2', 17: 'TX2', 36: 'VP', 39: 'VN' };
+const pinLabel = (n) => (WOKWI_LABEL[n] ? `${n}/${WOKWI_LABEL[n]}` : String(n));
+
+const INFER_MS = 200;
+const STABLE_MS = 1500;
+const COOLDOWN_MS = 3000;
+const STALE_MS = 15000;   // no telemetry for this long => grey the bin out
+const LID_OPEN_MS = 2000; // mirrors the firmware's lid dwell
+
+const $ = (s) => document.querySelector(s);
+const el = {
+  cam: $('#cam'), camOverlay: $('#camOverlay'), startCam: $('#startCam'),
+  stopCam: $('#stopCam'), camSelect: $('#camSelect'),
+  bars: $('#bars'), verdict: $('#verdict'), verdictItem: $('#verdictItem'),
+  present: $('#present'), autoPresent: $('#autoPresent'),
+  log: $('#log'), clearLog: $('#clearLog'),
+  modelPill: $('#modelPill'), mqttPill: $('#mqttPill'), stationPill: $('#stationPill'),
+  binCards: $('#binCards'), circuitCards: $('#circuitCards'),
+  backToBins: $('#backToBins'), scanTag: $('#scanTag'),
+  scanTitle: $('#scanTitle'), scanSub: $('#scanSub'),
+  cfgProvider: $('#cfgProvider'), cfgKey: $('#cfgKey'), cfgGeminiModel: $('#cfgGeminiModel'),
+  cfgBroker: $('#cfgBroker'), cfgTopic: $('#cfgTopic'), cfgConf: $('#cfgConf'),
+  reconnect: $('#reconnect'),
+};
+
+const state = {
+  classifier: null,
+  stream: null,
+  targetBin: null,
+  latest: [],
+  note: null,
+  busy: false,
+  view: 'station',
+  stableSince: 0,
+  stableLabel: null,
+  lastAutoPublish: 0,
+  client: null,
+  inferTimer: null,
+  bins: Object.fromEntries(BINS.map((b) => [META[b].key, {
+    fill: null, gas: null, status: null, lastSeen: 0,
+    event: null, reason: null, eventAt: 0, lidOpenUntil: 0,
+  }])),
+};
+
+/* ── logging ──────────────────────────────────────────────────────────── */
+
+function log(msg, kind) {
+  const li = document.createElement('li');
+  const t = document.createElement('span');
+  t.className = 't';
+  t.textContent = new Date().toLocaleTimeString('en-GB', { hour12: false });
+  const m = document.createElement('span');
+  m.className = 'm' + (kind ? ` m--${kind}` : '');
+  m.textContent = msg;
+  li.append(t, m);
+  el.log.prepend(li);
+  while (el.log.children.length > 150) el.log.lastChild.remove();
+}
+
+function pill(node, text, kind) {
+  node.textContent = text;
+  node.className = `pill pill--${kind}`;
+}
+
+/* ── model providers ──────────────────────────────────────────────────── */
+
 const IMAGENET_MAP = {
   BIODEGRADABLE: ['banana', 'orange', 'lemon', 'pineapple', 'strawberry', 'fig',
     'pomegranate', 'granny smith', 'corn', 'broccoli', 'cabbage', 'cauliflower',
@@ -49,66 +128,15 @@ const IMAGENET_MAP = {
     'lipstick', 'nipple', 'swab', 'broom', 'mop', 'velvet', 'wool'],
 };
 
-const $ = (s) => document.querySelector(s);
-const el = {
-  cam: $('#cam'), camOverlay: $('#camOverlay'), startCam: $('#startCam'),
-  stopCam: $('#stopCam'), camSelect: $('#camSelect'),
-  bins: $('#bins'), bars: $('#bars'), verdict: $('#verdict'),
-  verdictItem: $('#verdictItem'),
-  present: $('#present'), autoPresent: $('#autoPresent'),
-  log: $('#log'), clearLog: $('#clearLog'),
-  modelPill: $('#modelPill'), mqttPill: $('#mqttPill'),
-  cfgProvider: $('#cfgProvider'), cfgKey: $('#cfgKey'), cfgGeminiModel: $('#cfgGeminiModel'),
-  cfgBroker: $('#cfgBroker'), cfgTopic: $('#cfgTopic'), cfgConf: $('#cfgConf'),
-  reconnect: $('#reconnect'),
-};
-
-const state = {
-  classifier: null,   // { kind, mode, detail, predict(video) -> [{label,p}] }
-  stream: null,
-  targetBin: null,
-  latest: [],         // last prediction, sorted desc
-  note: null,         // free-text explanation from the provider, if any
-  busy: false,
-  stableSince: 0,
-  stableLabel: null,
-  lastAutoPublish: 0,
-  client: null,
-  inferTimer: null,
-};
-
-/* ── logging ──────────────────────────────────────────────────────────── */
-
-function log(msg, kind) {
-  const li = document.createElement('li');
-  const t = document.createElement('span');
-  t.className = 't';
-  t.textContent = new Date().toLocaleTimeString('en-GB', { hour12: false });
-  const m = document.createElement('span');
-  m.className = 'm' + (kind ? ` m--${kind}` : '');
-  m.textContent = msg;
-  li.append(t, m);
-  el.log.prepend(li);
-  while (el.log.children.length > 120) el.log.lastChild.remove();
-}
-
-function pill(node, text, kind) {
-  node.textContent = text;
-  node.className = `pill pill--${kind}`;
-}
-
-/* ── model ────────────────────────────────────────────────────────────── */
-
 function normaliseLabel(raw) {
   const s = String(raw).trim().toUpperCase().replace(/[\s-]+/g, '_');
   if (BINS.includes(s)) return s;
   if (/^(BIO|ORGANIC|COMPOST)/.test(s)) return 'BIODEGRADABLE';
   if (/^(REC|RECYCLE)/.test(s)) return 'RECYCLABLE';
   if (/^(NON|RESIDUAL|TRASH|GENERAL)/.test(s)) return 'NON_RECYCLABLE';
-  return null; // unknown label from a custom model — surfaced as-is
+  return null;
 }
 
-/** Grab the current video frame as a base64 JPEG, downscaled to cap upload size. */
 function captureFrame(video, maxEdge = 640, quality = 0.85) {
   const scale = Math.min(1, maxEdge / Math.max(video.videoWidth, video.videoHeight));
   const c = document.createElement('canvas');
@@ -192,8 +220,6 @@ function loadGemini() {
       const p = Math.max(0, Math.min(1, Number(out.confidence) || 0));
       state.note = out.item ? `${out.item} — ${out.reason}` : out.reason;
 
-      // Present the winner plus the remaining mass spread over the others, so
-      // the bars stay readable even though Gemini returns a single verdict.
       const rest = BINS.filter((b) => b !== label);
       return [
         { label, p },
@@ -231,16 +257,12 @@ async function loadMobileNetFallback() {
       for (const r of raw) {
         const name = r.className.toLowerCase();
         for (const bin of BINS) {
-          if (IMAGENET_MAP[bin].some((kw) => name.includes(kw))) {
-            acc[bin] += r.probability;
-            break;
-          }
+          if (IMAGENET_MAP[bin].some((kw) => name.includes(kw))) { acc[bin] += r.probability; break; }
         }
       }
       const total = BINS.reduce((s, b) => s + acc[b], 0);
       if (total === 0) return BINS.map((b) => ({ label: b, p: 0 }));
-      return BINS.map((b) => ({ label: b, p: acc[b] / total }))
-        .sort((a, b) => b.p - a.p);
+      return BINS.map((b) => ({ label: b, p: acc[b] / total })).sort((a, b) => b.p - a.p);
     },
   };
 }
@@ -259,10 +281,10 @@ async function initModel() {
   try {
     if (want === 'gemini') {
       state.classifier = loadGemini();
-      pill(el.modelPill, `model: ${state.classifier.detail}`, el.cfgKey.value.trim() ? 'ok' : 'warn');
-      log(el.cfgKey.value.trim()
-        ? `${state.classifier.detail} ready — press Present item to classify`
-        : 'Gemini selected but no API key yet. Paste one below.', el.cfgKey.value.trim() ? 'ok' : 'err');
+      const hasKey = !!el.cfgKey.value.trim();
+      pill(el.modelPill, `model: ${state.classifier.detail}`, hasKey ? 'ok' : 'warn');
+      log(hasKey ? `${state.classifier.detail} ready` : 'Gemini selected but no API key yet.',
+          hasKey ? 'ok' : 'err');
     } else if (want === 'teachable') {
       state.classifier = await loadTeachableMachine();
       pill(el.modelPill, `model: ${state.classifier.detail}`, 'ok');
@@ -274,10 +296,9 @@ async function initModel() {
     }
   } catch (e) {
     pill(el.modelPill, 'model: FAILED', 'bad');
-    const hint = want === 'teachable'
+    log(`Model load failed: ${e.message}. ${want === 'teachable'
       ? 'Put an exported Teachable Machine model in classifier/model/.'
-      : 'MobileNet needs internet on first load.';
-    log(`Model load failed: ${e.message}. ${hint}`, 'err');
+      : 'MobileNet needs internet on first load.'}`, 'err');
     return;
   }
 
@@ -285,12 +306,43 @@ async function initModel() {
   renderVerdict();
 }
 
+/* ── views ────────────────────────────────────────────────────────────── */
+
+function showView(name) {
+  state.view = name;
+  for (const v of ['station', 'scanner', 'circuit']) {
+    $(`#view-${v}`).hidden = v !== name;
+  }
+  document.querySelectorAll('.tab').forEach((t) => {
+    const on = (t.dataset.view === 'station' && name !== 'circuit')
+            || (t.dataset.view === 'circuit' && name === 'circuit');
+    t.classList.toggle('tab--on', on);
+    t.setAttribute('aria-selected', String(on));
+  });
+  if (name !== 'scanner' && state.stream) stopCamera();
+}
+
+function openScanner(binClass) {
+  state.targetBin = binClass;
+  state.latest = [];
+  state.note = null;
+  const m = META[binClass];
+  el.scanTag.textContent = m.short;
+  el.scanTag.dataset.bin = m.key;
+  el.scanTitle.textContent = m.name;
+  el.scanSub.textContent = m.hint;
+  renderBars();
+  renderVerdict();
+  showView('scanner');
+  startCamera();
+}
+
 /* ── camera ───────────────────────────────────────────────────────────── */
 
 async function listCameras() {
   try {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    const cams = devices.filter((d) => d.kind === 'videoinput');
+    const cams = (await navigator.mediaDevices.enumerateDevices())
+      .filter((d) => d.kind === 'videoinput');
     el.camSelect.innerHTML = '';
     cams.forEach((c, i) => {
       const o = document.createElement('option');
@@ -317,7 +369,6 @@ async function startCamera() {
     el.stopCam.disabled = false;
     el.present.disabled = false;
     await listCameras();
-    log('Camera started', 'ok');
     startInference();
   } catch (e) {
     log(`Camera failed: ${e.message}`, 'err');
@@ -336,7 +387,6 @@ function stopCamera() {
   state.latest = [];
   renderBars();
   renderVerdict();
-  log('Camera stopped');
 }
 
 /* ── inference ────────────────────────────────────────────────────────── */
@@ -360,26 +410,21 @@ function startInference() {
   }, INFER_MS);
 }
 
-/** One classification on demand, then publish it. Used by on-demand providers. */
 async function classifyOnce(note) {
   if (state.busy) return;
   if (!state.classifier) { log('No classifier loaded', 'err'); return; }
   if (!state.stream || el.cam.readyState < 2) { log('Camera is not running', 'err'); return; }
-  if (!state.targetBin) { log('Pick a target bin first', 'err'); return; }
 
   state.busy = true;
   el.present.disabled = true;
   const original = el.present.textContent;
   el.present.textContent = 'Classifying…';
-  pill(el.modelPill, `model: ${state.classifier.detail} · working`, 'warn');
   try {
     state.latest = await state.classifier.predict(el.cam);
     renderBars();
     renderVerdict();
-    pill(el.modelPill, `model: ${state.classifier.detail}`, 'ok');
     publishClassification(note);
   } catch (e) {
-    pill(el.modelPill, `model: ${state.classifier.detail} · error`, 'bad');
     log(`Classification failed: ${e.message}`, 'err');
   } finally {
     state.busy = false;
@@ -395,31 +440,23 @@ function threshold() {
 
 /** The decision the ESP32 is expected to reach, mirrored for the operator. */
 function decide() {
-  if (!state.targetBin) return { verdict: 'IDLE', why: 'Pick the bin the item is presented to' };
+  if (!state.targetBin) return { verdict: 'IDLE', why: 'Pick a bin' };
   if (!state.latest.length) return { verdict: 'IDLE', why: 'Waiting for the camera' };
   const top = state.latest[0];
   if (top.label === 'NO_MATCH') {
-    return {
-      verdict: 'NO MATCH', kind: 'nomatch', reason: 'no_item',
-      why: 'No identifiable waste item presented — lid stays locked',
-    };
+    return { verdict: 'NO MATCH', kind: 'nomatch', reason: 'no_item',
+             why: 'No identifiable waste item presented — lid stays locked' };
   }
   if (top.p < threshold()) {
-    return {
-      verdict: 'NO MATCH', kind: 'nomatch', reason: 'low_confidence',
-      why: `Best guess ${top.label} at ${(top.p * 100).toFixed(0)}%, below ${(threshold() * 100).toFixed(0)}% — lid stays locked`,
-    };
+    return { verdict: 'NO MATCH', kind: 'nomatch', reason: 'low_confidence',
+             why: `Best guess ${top.label} at ${(top.p * 100).toFixed(0)}%, below ${(threshold() * 100).toFixed(0)}% — lid stays locked` };
   }
   if (top.label !== state.targetBin) {
-    return {
-      verdict: 'REJECT', kind: 'reject', reason: 'class_mismatch',
-      why: `Detected ${top.label} at the ${SHORT[state.targetBin]} bin — lid stays locked`,
-    };
+    return { verdict: 'REJECT', kind: 'reject', reason: 'class_mismatch',
+             why: `Detected ${top.label} at the ${SHORT[state.targetBin]} bin — lid stays locked` };
   }
-  return {
-    verdict: 'ACCEPT', kind: 'accept', reason: null,
-    why: `${top.label} at ${(top.p * 100).toFixed(0)}% matches this bin — lid unlocks`,
-  };
+  return { verdict: 'ACCEPT', kind: 'accept', reason: null,
+           why: `${top.label} at ${(top.p * 100).toFixed(0)}% matches this bin — lid unlocks` };
 }
 
 function trackStability() {
@@ -432,8 +469,7 @@ function trackStability() {
   }
   if (!el.autoPresent.checked) return;
   const now = Date.now();
-  const held = now - state.stableSince;
-  if (held >= STABLE_MS && now - state.lastAutoPublish >= COOLDOWN_MS) {
+  if (now - state.stableSince >= STABLE_MS && now - state.lastAutoPublish >= COOLDOWN_MS) {
     if (decide().verdict !== 'IDLE') {
       state.lastAutoPublish = now;
       publishClassification('auto');
@@ -478,7 +514,153 @@ function renderVerdict() {
   el.verdictItem.hidden = !state.note;
 }
 
+function binSvg(key, fillPct, lidOpen, red, green) {
+  const inner = 92, top = 44;
+  const h = Math.max(0, Math.min(100, fillPct ?? 0)) / 100 * inner;
+  return `
+  <svg viewBox="0 0 168 152" class="binSvg" aria-hidden="true">
+    <rect class="binLid" x="20" y="24" width="100" height="12" rx="3"
+          transform="rotate(${lidOpen ? -38 : 0} 21 30)"/>
+    <rect class="binBody" x="24" y="${top - 4}" width="92" height="104" rx="7"/>
+    <rect class="binWaste" x="28" y="${top + inner - h}" width="84" height="${h}" rx="3"/>
+    <circle class="led ${red ? 'led--red' : ''}" cx="140" cy="58" r="8"/>
+    <circle class="led ${green ? 'led--green' : ''}" cx="140" cy="86" r="8"/>
+  </svg>`;
+}
+
+function binView(binClass) {
+  const m = META[binClass];
+  const s = state.bins[m.key];
+  const now = Date.now();
+  const seen = s.lastSeen > 0;
+  const stale = seen && now - s.lastSeen > STALE_MS;
+  const live = seen && !stale;
+  const full = live && s.status === 'FULL';
+  const lidOpen = now < s.lidOpenUntil;
+  return { m, s, seen, stale, live, full, lidOpen };
+}
+
+function renderBinCards() {
+  el.binCards.innerHTML = '';
+  for (const binClass of BINS) {
+    const { m, s, seen, stale, live, full, lidOpen } = binView(binClass);
+
+    const card = document.createElement('button');
+    card.className = 'binCard'
+      + (stale || !seen ? ' binCard--stale' : '')
+      + (full ? ' binCard--full' : '');
+    card.dataset.bin = binClass;
+    card.type = 'button';
+
+    const fillText = live ? `${s.fill}%` : '—';
+    const statusText = !seen ? 'no telemetry'
+      : stale ? 'stale' : full ? 'FULL — not accepting' : 'ready';
+
+    card.innerHTML = `
+      <div class="binHead">
+        <h3 class="binName">${m.name}</h3>
+        <span class="binTag" data-bin="${m.key}">${m.short}</span>
+      </div>
+      <p class="binHint">${m.hint}</p>
+      ${binSvg(m.key, s.fill, lidOpen, full || !live, live && !full)}
+      <div class="binMeter"><div class="binMeter__fill" style="width:${live ? s.fill : 0}%"></div></div>
+      <div class="binFoot">
+        <span class="binFill">${fillText}</span>
+        <span class="binStatus">${statusText}</span>
+      </div>
+      <span class="binGo">${full ? 'Bin is full' : 'Tap to scan an item'}</span>
+    `;
+    el.binCards.append(card);
+  }
+}
+
+function renderCircuitCards() {
+  el.circuitCards.innerHTML = '';
+  for (const binClass of BINS) {
+    const { m, s, seen, stale, live, full, lidOpen } = binView(binClass);
+    const p = PINS[m.key];
+    const card = document.createElement('div');
+    card.className = 'binCard binCard--static'
+      + (stale || !seen ? ' binCard--stale' : '') + (full ? ' binCard--full' : '');
+    card.innerHTML = `
+      <div class="binHead">
+        <h3 class="binName">${m.name}</h3>
+        <span class="binTag" data-bin="${m.key}">${m.short}</span>
+      </div>
+      <p class="binPins">
+        TRIG ${pinLabel(p.trig)} · ECHO ${pinLabel(p.echo)} · SERVO ${pinLabel(p.servo)}<br>
+        LED-R ${pinLabel(p.red)} · LED-G ${pinLabel(p.green)}
+      </p>
+      ${binSvg(m.key, s.fill, lidOpen, full || !live, live && !full)}
+      <div class="binStats">
+        <div class="stat"><span class="stat__k">Fill</span>
+          <span class="stat__v ${full ? 'stat__v--bad' : ''}">${live ? s.fill + '%' : '—'}</span></div>
+        <div class="stat"><span class="stat__k">Gas</span>
+          <span class="stat__v">${live && s.gas != null ? s.gas : '—'}</span></div>
+        <div class="stat"><span class="stat__k">Lid</span>
+          <span class="stat__v ${lidOpen ? 'stat__v--ok' : ''}">${lidOpen ? 'open' : 'locked'}</span></div>
+      </div>
+      <p class="binEvent ${s.event === 'ACCEPT' ? 'binEvent--accept' : s.event === 'REJECT' ? 'binEvent--reject' : ''}">
+        ${s.event ? `${s.event}${s.reason ? ' · ' + s.reason : ''}` : '—'}
+      </p>`;
+    el.circuitCards.append(card);
+  }
+
+  const seen = BINS.filter((b) => state.bins[META[b].key].lastSeen > 0).length;
+  const fresh = BINS.filter((b) => Date.now() - state.bins[META[b].key].lastSeen < STALE_MS).length;
+  if (!seen) pill(el.stationPill, 'no telemetry yet', 'warn');
+  else if (!fresh) pill(el.stationPill, 'controller silent', 'bad');
+  else pill(el.stationPill, `${fresh}/3 bins reporting`, 'ok');
+}
+
+function renderAll() {
+  if (state.view === 'station') renderBinCards();
+  if (state.view === 'circuit') renderCircuitCards();
+}
+
 /* ── MQTT ─────────────────────────────────────────────────────────────── */
+
+function subscribeTelemetry() {
+  const root = el.cfgTopic.value.trim();
+  for (const leaf of ['telemetry', 'event']) {
+    const t = `${root}/bin/+/${leaf}`;
+    state.client.subscribe(t, (err) => {
+      if (err) log(`Subscribe failed: ${t}`, 'err');
+      else log(`Subscribed ${t}`, 'ok');
+    });
+  }
+}
+
+function onBrokerMessage(topic, buf) {
+  const root = el.cfgTopic.value.trim();
+  const m = topic.startsWith(`${root}/bin/`)
+    ? topic.slice(root.length + 5).split('/') : null;
+  if (!m || m.length !== 2) return;
+  const [key, leaf] = m;
+  const s = state.bins[key];
+  if (!s) return;
+
+  let doc;
+  try { doc = JSON.parse(buf.toString()); }
+  catch { log(`Bad JSON on ${topic}`, 'err'); return; }
+
+  s.lastSeen = Date.now();
+  if (leaf === 'telemetry') {
+    s.fill = doc.fill ?? s.fill;
+    s.gas = doc.gas ?? s.gas;
+    s.status = doc.status ?? s.status;
+  } else {
+    s.event = doc.event ?? null;
+    s.reason = doc.reason ?? null;
+    s.eventAt = Date.now();
+    if (doc.fill != null) s.fill = doc.fill;
+    if (doc.event === 'ACCEPT') s.lidOpenUntil = Date.now() + LID_OPEN_MS;
+    if (doc.event === 'FULL') s.status = 'FULL';
+    log(`${BY_KEY[key]} ${doc.event}${doc.reason ? ' (' + doc.reason + ')' : ''}`,
+        doc.event === 'ACCEPT' ? 'ok' : doc.event ? 'err' : undefined);
+  }
+  renderAll();
+}
 
 function connect() {
   if (state.client) { try { state.client.end(true); } catch {} state.client = null; }
@@ -488,9 +670,7 @@ function connect() {
   try {
     state.client = mqtt.connect(url, {
       clientId: `swm-classifier-${Math.random().toString(16).slice(2, 10)}`,
-      connectTimeout: 8000,
-      reconnectPeriod: 4000,
-      clean: true,
+      connectTimeout: 8000, reconnectPeriod: 4000, clean: true,
     });
   } catch (e) {
     pill(el.mqttPill, 'broker: bad URL', 'bad');
@@ -500,7 +680,9 @@ function connect() {
   state.client.on('connect', () => {
     pill(el.mqttPill, 'broker: connected', 'ok');
     log('Broker connected', 'ok');
+    subscribeTelemetry();
   });
+  state.client.on('message', onBrokerMessage);
   state.client.on('reconnect', () => pill(el.mqttPill, 'broker: reconnecting…', 'warn'));
   state.client.on('close', () => pill(el.mqttPill, 'broker: offline', 'bad'));
   state.client.on('error', (e) => {
@@ -512,10 +694,7 @@ function connect() {
 function publish(payload, note) {
   const topic = `${el.cfgTopic.value.trim()}/classify`;
   const body = JSON.stringify(payload);
-  if (!state.client?.connected) {
-    log(`OFFLINE, not sent: ${body}`, 'err');
-    return;
-  }
+  if (!state.client?.connected) { log(`OFFLINE, not sent: ${body}`, 'err'); return; }
   state.client.publish(topic, body, { qos: 0 }, (err) => {
     if (err) log(`Publish failed: ${err.message}`, 'err');
     else log(`${topic} ${body}${note ? ` (${note})` : ''}`, 'ok');
@@ -541,26 +720,23 @@ function publishClassification(note) {
 }
 
 function publishManual(label) {
-  if (!state.targetBin) { log('Pick a target bin first', 'err'); return; }
+  if (!state.targetBin) { log('Open a bin first', 'err'); return; }
   publish({
-    class: label,
-    confidence: 1,
-    target: SHORT[state.targetBin],
-    source: 'manual',
-    ts: Math.floor(Date.now() / 1000),
+    class: label, confidence: 1, target: SHORT[state.targetBin],
+    source: 'manual', ts: Math.floor(Date.now() / 1000),
   }, 'manual override');
 }
 
 /* ── wiring ───────────────────────────────────────────────────────────── */
 
-el.bins.addEventListener('click', (e) => {
-  const btn = e.target.closest('.bin');
-  if (!btn) return;
-  state.targetBin = btn.dataset.bin;
-  [...el.bins.children].forEach((b) =>
-    b.setAttribute('aria-checked', String(b === btn)));
-  renderVerdict();
+el.binCards.addEventListener('click', (e) => {
+  const card = e.target.closest('.binCard');
+  if (card?.dataset.bin) openScanner(card.dataset.bin);
 });
+
+document.querySelectorAll('.tab').forEach((t) =>
+  t.addEventListener('click', () => showView(t.dataset.view)));
+el.backToBins.addEventListener('click', () => showView('station'));
 
 el.startCam.addEventListener('click', startCamera);
 el.stopCam.addEventListener('click', stopCamera);
@@ -575,8 +751,6 @@ el.present.addEventListener('click', () => {
   else classifyOnce('present');
 });
 
-/* Settings persistence. The API key lives in localStorage on this machine only
- * and is deliberately never written to a file in the repository. */
 const SAVED = ['cfgProvider', 'cfgGeminiModel', 'cfgKey', 'cfgConf', 'cfgBroker', 'cfgTopic'];
 
 function applyProviderVisibility() {
@@ -584,8 +758,7 @@ function applyProviderVisibility() {
   document.querySelectorAll('.geminiOnly').forEach((n) => { n.hidden = !gemini; });
   el.autoPresent.disabled = gemini;
   el.autoPresent.parentElement.title = gemini
-    ? 'Disabled for Gemini — the free tier allows only 5-15 requests per minute'
-    : '';
+    ? 'Disabled for Gemini — the free tier allows only 5-15 requests per minute' : '';
   if (gemini) el.autoPresent.checked = false;
 }
 
@@ -605,18 +778,19 @@ for (const id of SAVED) {
 }
 
 el.cfgProvider.addEventListener('change', () => { applyProviderVisibility(); initModel(); });
-el.cfgGeminiModel.addEventListener('change', () => {
-  if (el.cfgProvider.value === 'gemini') initModel();
-});
-el.cfgKey.addEventListener('change', () => {
-  if (el.cfgProvider.value === 'gemini') initModel();
-});
+el.cfgGeminiModel.addEventListener('change', () => { if (el.cfgProvider.value === 'gemini') initModel(); });
+el.cfgKey.addEventListener('change', () => { if (el.cfgProvider.value === 'gemini') initModel(); });
+el.cfgTopic.addEventListener('change', () => { if (state.client?.connected) subscribeTelemetry(); });
+
+// Repaint on a timer so staleness and the lid dwell expire on their own.
+setInterval(renderAll, 500);
 
 (async function main() {
   restoreSettings();
   applyProviderVisibility();
   renderBars();
   renderVerdict();
+  renderAll();
   if (location.protocol === 'file:') {
     log('Opened via file:// — the camera will be blocked. Run serve.bat and use http://localhost:8000', 'err');
   }
