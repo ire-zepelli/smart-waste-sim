@@ -1,27 +1,34 @@
-/* Smart Waste Management — station 01 front end.
+/* Zura — smart waste bins, station 01 front end.
  *
- * Three views:
+ * Surfaces:
  *   station   the three bins with live fill and lock state. Tap one to scan.
- *   scanner   one bin's camera. Classifies, then publishes over MQTT.
- *   circuit   pin-level wiring and raw MQTT traffic.
+ *   scan      a modal holding that bin's camera. Classifies, publishes on MQTT.
+ *   circuit   a live wiring schematic plus per-bin telemetry and raw traffic.
  *
- * Bin state is not simulated here. It arrives as telemetry from the ESP32 and
- * goes stale if the controller stops publishing, rather than showing an old
- * number as though it were live.
+ * Bin state is never simulated here. It arrives as telemetry from the ESP32 and
+ * goes stale after STALE_MS rather than showing an old number as though it were
+ * live. The schematic is driven by the same state, so an unpowered controller
+ * shows dark LEDs and empty bins instead of a plausible-looking fiction.
  *
- * Three swappable classifiers, chosen at runtime:
+ * Four swappable classifiers, chosen at runtime:
  *
- *   gemini     Cloud vision. Best accuracy on real, deformed, dirty waste and
- *              needs no training. Implements the "image uploads from the
- *              ESP32-CAM" path the project document specifies (p9).
- *              On-demand only: the free tier allows 5-15 requests/minute.
+ *   groq       Cloud vision, the default. qwen/qwen3.8-27b. Verified against
+ *              the live API: api.groq.com sends access-control-allow-origin:*
+ *              so the browser calls it directly, no proxy. Do NOT move this to
+ *              qwen3.6-27b — that model fails JSON validation.
+ *   gemini     Cloud vision. gemini-2.5-flash. Auth goes in ?key= because the
+ *              x-goog-api-key header triggers a CORS preflight this endpoint
+ *              refuses. Free tier is 5-15 requests/minute.
  *   teachable  Teachable Machine model in ./model/. Runs offline at ~5fps.
  *              This is the demo-safe fallback when the network dies.
- *   mobilenet  Stock ImageNet model plus a crude keyword map. Present only so
- *              the page does something before either of the above is set up.
+ *   mobilenet  Stock ImageNet plus a crude keyword map. Present only so the
+ *              page does something before the others are configured, and
+ *              labelled untrained in the UI so it cannot be mistaken for real.
  *
- * The Gemini key is entered at runtime and kept in localStorage. It is never
- * written to a file in this repository.
+ * Both cloud providers are on-demand: every scan is a metered API call, so it
+ * fires on the button and never on a timer. Keys are entered at runtime and
+ * held in localStorage, stored per provider so switching cannot send one
+ * provider's key to the other. No key is ever written to a file here.
  */
 
 const BINS = ['BIODEGRADABLE', 'RECYCLABLE', 'NON_RECYCLABLE'];
@@ -115,6 +122,7 @@ const el = {
   scanModalIcon: $('#scanModalIcon'), scanModalTitle: $('#scanModalTitle'),
   scanModalSub: $('#scanModalSub'), closeScanModal: $('#closeScanModal'),
   scanStatusBadge: $('#scanStatusBadge'), scanModalHint: $('#scanModalHint'),
+  schematic: $('#schematic'),
   totalSorted: $('#totalSorted'), statusDot: $('#statusDot'),
   helpBtn: $('#helpBtn'), helpPanel: $('#helpPanel'), helpClose: $('#helpClose'),
   cfgProvider: $('#cfgProvider'), cfgKey: $('#cfgKey'), cfgGeminiModel: $('#cfgGeminiModel'),
@@ -737,6 +745,164 @@ function updateHeader() {
   el.statusDot.title = why;
 }
 
+/* ── schematic ────────────────────────────────────────────────────────────
+ * A live wiring diagram of the station. Geometry is derived from one layout
+ * table and the PINS map above, so the drawing cannot drift from the firmware:
+ * change a pin in one place and the label, the pad and the wire all move.    */
+
+const SCH = {
+  w: 1240, h: 800,
+  board: { x: 505, y: 120, w: 200, h: 545 },
+  rows: [170, 345, 520],        // one per bin: bio, rec, non
+  usX: 70, servoX: 800, ledX: 1055,
+  potX: 120, potY: 690, btnY: 700,
+};
+
+const WIRE = { sig: '#4ade80', pwm: '#fb923c', pwr: '#f87171', gnd: '#64748b', adc: '#c084fc' };
+
+/** Wokwi-ish ribbon wire: a horizontal-tangent cubic between two pads. */
+function wire(x1, y1, x2, y2, colour, dim) {
+  const k = Math.max(40, Math.abs(x2 - x1) * 0.42);
+  return `<path d="M${x1} ${y1} C${x1 + (x2 > x1 ? k : -k)} ${y1}, ${x2 - (x2 > x1 ? k : -k)} ${y2}, ${x2} ${y2}"
+           fill="none" stroke="${colour}" stroke-width="2.2" stroke-linecap="round"
+           opacity="${dim ? .25 : .8}"/>`;
+}
+
+function pad(x, y, label, side) {
+  const tx = side === 'left' ? x - 9 : x + 9;
+  return `<circle cx="${x}" cy="${y}" r="4" class="pad"/>
+    <text x="${tx}" y="${y + 3.5}" class="padTxt" text-anchor="${side === 'left' ? 'end' : 'start'}">${label}</text>`;
+}
+
+function renderSchematic() {
+  if (!el.schematic) return;
+  const B = SCH.board;
+  const leftX = B.x, rightX = B.x + B.w;
+  const wires = [], parts = [], pads = [];
+
+  // Board-edge pad positions, spread evenly down each side.
+  const L = {}, R = {};
+  const leftOrder  = ['bioTrig','bioEcho','recTrig','recEcho','nonTrig','nonEcho','gas','btnBin','btnItem','gndL'];
+  const rightOrder = ['bioServo','bioRed','bioGreen','recServo','recRed','recGreen','nonServo','nonRed','nonGreen','vin','gndR'];
+  leftOrder.forEach((k, i) => { L[k] = B.y + 34 + i * ((B.h - 68) / (leftOrder.length - 1)); });
+  rightOrder.forEach((k, i) => { R[k] = B.y + 26 + i * ((B.h - 52) / (rightOrder.length - 1)); });
+
+  const LBL = { 13:'D13', 14:'D14', 26:'D26', 25:'D25', 32:'D32', 33:'D33',
+                34:'D34', 35:'D35', 36:'VP', 39:'VN', 16:'RX2', 17:'TX2',
+                18:'D18', 19:'D19', 21:'D21', 22:'D22', 23:'D23', 27:'D27' };
+
+  BINS.forEach((binClass, i) => {
+    const m = META[binClass], p = PINS[m.key], y = SCH.rows[i];
+    const { s, live, full, lidOpen } = binView(binClass);
+    const fill = live ? s.fill : 0;
+    const tone = m.key === 'bio' ? '#4ade80' : m.key === 'rec' ? '#38bdf8' : '#f97316';
+
+    // ── HC-SR04 on the left, with the measured fill drawn inside a bin body
+    const ux = SCH.usX;
+    parts.push(`
+      <g class="part">
+        <rect x="${ux}" y="${y - 34}" width="150" height="52" rx="7" class="chip"/>
+        <circle cx="${ux + 38}" cy="${y - 8}" r="16" class="xducer"/>
+        <circle cx="${ux + 112}" cy="${y - 8}" r="16" class="xducer"/>
+        <text x="${ux + 75}" y="${y + 12}" class="chipTxt" text-anchor="middle">HC-SR04</text>
+        <rect x="${ux + 20}" y="${y + 30}" width="110" height="78" rx="6" class="binBody"/>
+        <rect x="${ux + 24}" y="${y + 104 - (fill / 100) * 70}" width="102"
+              height="${(fill / 100) * 70}" rx="4" fill="${tone}" opacity=".55"/>
+        <text x="${ux + 75}" y="${y + 126}" class="chipSub" text-anchor="middle">
+          ${m.short} ${live ? s.fill + '%' : '—'}${full ? ' FULL' : ''}</text>
+      </g>`);
+    wires.push(wire(leftX, L[m.key + 'Trig'], ux + 150, y - 18, WIRE.sig, !live));
+    wires.push(wire(leftX, L[m.key + 'Echo'], ux + 150, y + 2,  WIRE.sig, !live));
+    pads.push(pad(leftX, L[m.key + 'Trig'], LBL[p.trig], 'left'));
+    pads.push(pad(leftX, L[m.key + 'Echo'], LBL[p.echo], 'left'));
+
+    // ── servo on the right, horn swinging to the open angle
+    const sx = SCH.servoX, ang = lidOpen ? -38 : 0;
+    parts.push(`
+      <g class="part">
+        <rect x="${sx}" y="${y - 26}" width="86" height="52" rx="6" class="chip"/>
+        <circle cx="${sx + 86}" cy="${y}" r="13" class="xducer"/>
+        <g transform="rotate(${ang} ${sx + 86} ${y})">
+          <rect x="${sx + 84}" y="${y - 3}" width="46" height="6" rx="3"
+                fill="${lidOpen ? '#4ade80' : '#5a6472'}"/>
+        </g>
+        <text x="${sx + 43}" y="${y + 4}" class="chipTxt" text-anchor="middle">SG90</text>
+        <text x="${sx + 43}" y="${y + 44}" class="chipSub" text-anchor="middle">
+          ${lidOpen ? 'UNLOCKED' : 'locked'}</text>
+      </g>`);
+    wires.push(wire(rightX, R[m.key + 'Servo'], sx, y - 8, WIRE.pwm, !live));
+    pads.push(pad(rightX, R[m.key + 'Servo'], LBL[p.servo], 'right'));
+
+    // ── the two status LEDs
+    const redOn = full || !live, greenOn = live && !full;
+    [['Red', redOn, '#f87171', y - 16], ['Green', greenOn, '#4ade80', y + 20]].forEach(([nm, on, col, ly]) => {
+      parts.push(`
+        <g class="part">
+          <circle cx="${SCH.ledX}" cy="${ly}" r="11"
+                  fill="${on ? col : '#151b26'}" stroke="${on ? col : '#2b323e'}" stroke-width="2"
+                  ${on ? `filter="url(#glow)"` : ''}/>
+          <text x="${SCH.ledX + 20}" y="${ly + 4}" class="chipSub">${nm.toUpperCase()}</text>
+        </g>`);
+      wires.push(wire(rightX, R[m.key + nm], SCH.ledX - 11, ly, col, !on));
+      pads.push(pad(rightX, R[m.key + nm], LBL[nm === 'Red' ? p.red : p.green], 'right'));
+    });
+  });
+
+  // ── shared: gas potentiometer and the two fallback buttons
+  const anyGas = BINS.map((b) => state.bins[META[b].key].gas).find((g) => g != null);
+  parts.push(`
+    <g class="part">
+      <circle cx="${SCH.potX}" cy="${SCH.potY}" r="26" class="chip"/>
+      <line x1="${SCH.potX}" y1="${SCH.potY}" x2="${SCH.potX}" y2="${SCH.potY - 20}"
+            stroke="#c084fc" stroke-width="3" stroke-linecap="round"
+            transform="rotate(${anyGas != null ? (anyGas / 4095) * 270 - 135 : -135} ${SCH.potX} ${SCH.potY})"/>
+      <text x="${SCH.potX}" y="${SCH.potY + 46}" class="chipSub" text-anchor="middle">
+        MQ-135 ${anyGas != null ? anyGas : '—'}</text>
+    </g>`);
+  wires.push(wire(leftX, L.gas, SCH.potX + 26, SCH.potY, WIRE.adc, anyGas == null));
+  pads.push(pad(leftX, L.gas, 'VN', 'left'));
+
+  [['btnBin', 27, 'BIN', 300], ['btnItem', 23, 'PRESENT', 400]].forEach(([k, g, lbl, bx]) => {
+    parts.push(`
+      <g class="part">
+        <rect x="${bx}" y="${SCH.btnY - 16}" width="62" height="32" rx="7" class="chip"/>
+        <circle cx="${bx + 31}" cy="${SCH.btnY}" r="9" fill="#2b3442" stroke="#465063" stroke-width="2"/>
+        <text x="${bx + 31}" y="${SCH.btnY + 32}" class="chipSub" text-anchor="middle">${lbl}</text>
+      </g>`);
+    wires.push(wire(leftX, L[k], bx + 62, SCH.btnY, WIRE.sig, true));
+    pads.push(pad(leftX, L[k], LBL[g], 'left'));
+  });
+
+  // ── rails
+  wires.push(wire(leftX, L.gndL, SCH.potX, SCH.potY + 26, WIRE.gnd, true));
+  wires.push(wire(rightX, R.vin, SCH.servoX, SCH.rows[1] + 20, WIRE.pwr, true));
+  wires.push(wire(rightX, R.gndR, SCH.ledX - 11, SCH.rows[2] + 40, WIRE.gnd, true));
+  pads.push(pad(leftX, L.gndL, 'GND', 'left'));
+  pads.push(pad(rightX, R.vin, 'VIN', 'right'));
+  pads.push(pad(rightX, R.gndR, 'GND', 'right'));
+
+  const connected = !!state.client?.connected;
+  el.schematic.innerHTML = `
+  <svg viewBox="0 0 ${SCH.w} ${SCH.h}" class="schSvg" role="img"
+       aria-label="Wiring diagram of the ESP32 station controller">
+    <defs>
+      <filter id="glow" x="-90%" y="-90%" width="280%" height="280%">
+        <feGaussianBlur stdDeviation="4.5" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+    </defs>
+    ${wires.join('')}
+    <rect x="${B.x}" y="${B.y}" width="${B.w}" height="${B.h}" rx="12" class="board"/>
+    <rect x="${B.x + 22}" y="${B.y + 150}" width="${B.w - 44}" height="150" rx="5" class="boardChip"/>
+    <text x="${B.x + B.w / 2}" y="${B.y + 232}" class="boardTxt" text-anchor="middle">ESP32</text>
+    <text x="${B.x + B.w / 2}" y="${B.y + 252}" class="boardSub" text-anchor="middle">DEVKIT V1</text>
+    <text x="${B.x + B.w / 2}" y="${B.y - 14}" class="boardSub" text-anchor="middle">
+      STATION 01 · ${connected ? 'LINKED' : 'OFFLINE'}</text>
+    ${pads.join('')}
+    ${parts.join('')}
+  </svg>`;
+}
+
 function renderCircuitCards() {
   el.circuitCards.innerHTML = '';
   for (const binClass of BINS) {
@@ -777,7 +943,7 @@ function renderCircuitCards() {
 function renderAll() {
   if (state.view === 'station') renderBinCards();
   else updateHeader();
-  if (state.view === 'circuit') renderCircuitCards();
+  if (state.view === 'circuit') { renderSchematic(); renderCircuitCards(); }
 }
 
 /* ── MQTT ─────────────────────────────────────────────────────────────── */
