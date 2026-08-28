@@ -4,3 +4,4 @@ classifier/model/*
 # never commit credentials
 *.key
 .env
+*.env
