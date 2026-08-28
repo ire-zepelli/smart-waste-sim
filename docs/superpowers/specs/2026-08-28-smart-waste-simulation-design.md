@@ -61,34 +61,49 @@ The network diagram (p10) shows bins communicating directly with the Cloud Serve
 
 ### C1 — Classifier page (`classifier/index.html`)
 
-Single page, no build step, served over `http://localhost`. **Three swappable classifiers**, selected at runtime:
+Single page, no build step, served over `http://localhost`. **Four swappable classifiers**, selected at runtime:
 
-| Provider | Mode | Notes |
-| --- | --- | --- |
-| **Gemini API** (default) | on-demand | Best accuracy on real, deformed, contaminated waste. No training. Needs internet and a key. |
-| **Teachable Machine** | continuous ~5 fps | Loads from `classifier/model/`. Runs fully offline — the demo-safe fallback. |
-| **MobileNet heuristic** | continuous | Stock ImageNet plus a crude keyword map. Present only so the page does something before the other two are set up. Labelled untrained in the UI. |
+| Provider | Model | Mode | Notes |
+| --- | --- | --- | --- |
+| **Groq** (default) | `qwen/qwen3.8-27b` | on-demand | Verified against the live API. Best accuracy on real, deformed, contaminated waste. No training. |
+| **Gemini** | `gemini-2.5-flash` | on-demand | Equivalent capability; free tier is 5–15 req/min. |
+| **Teachable Machine** | user-supplied | continuous ~5 fps | Loads from `classifier/model/`. Runs fully offline — the demo-safe fallback. |
+| **MobileNet heuristic** | stock ImageNet | continuous | Crude keyword map. Present only so the page does something before the others are configured. Labelled untrained in the UI. |
+
+**Navigation.** Three surfaces: a **station** view of the three bins, a **scan modal** opened by tapping one, and a **circuit** tab. The bin being scanned is established by which card was tapped, mirroring the physical system where the target is implicit in which bin you walk up to. A bin at or above the full threshold is not tappable, since it would refuse everything.
 
 Common behaviour:
 
 - Three classes: `BIODEGRADABLE`, `RECYCLABLE`, `NON_RECYCLABLE`, plus `NO_MATCH`
-- Live webcam preview with per-class confidence bars
-- A **target bin** selector — which bin the user is presenting the item to
+- Live webcam preview inside the scan modal
 - Confidence threshold of **0.70**; below it the result is `NO_MATCH`, never a guess
-- Publishes over MQTT WebSocket to `ws://broker.hivemq.com:8000/mqtt`
+- The provider's one-line reason is rendered under the scan button — the most demonstrable part of the system, and the thing a panel will ask about
+- Per-bin collected counts and a station total, both derived from real `ACCEPT` events, never simulated locally
+- Publishes over MQTT WebSocket to `ws://broker.hivemq.com:8000/mqtt`, and subscribes to telemetry
 - Connection status indicator; explicit "not connected" state, never a silent failure
-- Manual override buttons that publish a classification with no camera at all
+- Manual override buttons that publish a classification with no camera and no model at all
 
-**Why Gemini is the default.** The project document already specifies this path: p9 states the 4G LTE/5G modem "offers high-bandwidth connectivity for areas requiring faster data transfer and image uploads from the ESP32-CAM," and hardware item 15 repeats it. Cloud classification is therefore the branch the design already documented. It also removes the weakest part of a student prototype — a model trained on fifty photographs of one bottle.
+**Why a cloud classifier is the default.** The project document already specifies this path: p9 states the 4G LTE/5G modem "offers high-bandwidth connectivity for areas requiring faster data transfer and image uploads from the ESP32-CAM," and hardware item 15 repeats it. Cloud classification is therefore the branch the design already documented. It also removes the weakest part of a student prototype — a model trained on fifty photographs of one bottle.
 
-**Gemini constraints, all load-bearing:**
+**Verified facts about the two cloud providers.** Each was established by calling the live API, not from documentation or recall:
 
-- Free tier is roughly **5–15 requests/minute, ~1,000/day**, so classification is fired by the *Present item* button and never by a timer. Auto-present is disabled while Gemini is selected.
-- Requests use `?key=` rather than the `x-goog-api-key` header, because a custom header triggers a CORS preflight that this endpoint rejects.
-- Structured output is enforced with `responseMimeType: application/json` and an explicit `responseSchema`, so the response cannot arrive as prose.
-- Default model `gemini-2.5-flash`, editable in the UI. Model names change; a text field costs nothing and prevents a dead demo.
+| | Groq | Gemini |
+| --- | --- | --- |
+| Endpoint | `api.groq.com/openai/v1/chat/completions` | `generativelanguage.googleapis.com/v1beta` |
+| Browser callable | Yes — returns `access-control-allow-origin: *` | Yes, using `?key=` |
+| Auth | `Authorization: Bearer` header | `?key=` query param |
+| Working vision model | `qwen/qwen3.8-27b` | `gemini-2.5-flash` |
+| Structured output | `response_format: {type: json_object}` | `responseMimeType` + explicit `responseSchema` |
 
-**Key handling.** The API key is entered at runtime and held in `localStorage` on that machine. It is never written to a file in this repository and never committed. The page states plainly that a key in a web page is readable by anyone using that page. For a classroom demo on a restricted key this is acceptable; for anything public the key belongs behind a proxy.
+Three traps worth recording, each of which cost a round trip to find:
+
+1. **Gemini rejects the `x-goog-api-key` header from a browser** — the custom header triggers a CORS preflight the endpoint refuses. The `?key=` query form avoids the preflight entirely.
+2. **Llama 4 Scout and Maverick 404 on Groq's free tier** despite being the models its documentation showcases. The account exposes 14 models and neither is among them.
+3. **`qwen/qwen3.6-27b` fails JSON validation** even in JSON mode, because it emits reasoning before the object. Only 3.8 is safe. The model name is an editable field so a rename cannot kill a demonstration, but it must not be moved back to 3.6.
+
+**Rate limits shape the interaction.** Every classification is a metered API call, so it is fired by the *Scan Item* button and never by a timer. Auto-present is disabled whenever a cloud provider is selected. Gemini's free tier is roughly 5–15 requests/minute and ~1,000/day.
+
+**Key handling.** Keys are entered at runtime and held in `localStorage`, stored **per provider** so switching between Groq and Gemini cannot send one provider's key to the other. No key is ever written to a file in this repository. The page states plainly that a key in a web page is readable by anyone using that page. For a supervised classroom demonstration on a restricted key this is acceptable; for anything public the key belongs behind a server-side proxy.
 
 **Constraint driving the localhost requirement:** Chrome refuses `getUserMedia` on `file://` because it is not a secure context. `http://localhost` qualifies as secure, and keeps plain `ws://` legal — HTTPS would force `wss://` on port 8884 as mixed-content protection. A `serve.bat` wrapping `python -m http.server 8000` handles this; Python 3.13 is already installed on the target machine.
 
@@ -159,13 +174,13 @@ Namespace is project-specific because HiveMQ's public broker is shared globally;
 ```
 uc-swm-4d/station01/classify                        (classifier page → ESP32)
     {"class":"RECYCLABLE","confidence":0.94,"target":"REC",
-     "source":"gemini","item":"plastic bottle — clean PET, recyclable",
+     "source":"groq","item":"plastic bottle — clean PET, recyclable",
      "ts":1756377600}
 
   class      one of BIODEGRADABLE | RECYCLABLE | NON_RECYCLABLE | NO_MATCH
   target     BIO | REC | NON — the bin the item was presented to
-  source     gemini | teachable | mobilenet | manual — which classifier decided
-  item       optional free text; only Gemini populates it
+  source     groq | gemini | teachable | mobilenet | manual — which classifier decided
+  item       optional free text; only the cloud providers populate it
 
 uc-swm-4d/station01/bin/{bio|rec|non}/telemetry      (ESP32 → broker)
     {"fill":42,"gas":180,"status":"OK"}

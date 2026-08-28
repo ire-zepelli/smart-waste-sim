@@ -475,3 +475,14 @@ body{
 .scanStatusBadge[data-kind="accept"]{color:var(--ok); border-color:var(--ok)}
 .scanStatusBadge[data-kind="reject"]{color:var(--bad); border-color:var(--bad)}
 .scanStatusBadge[data-kind="nomatch"]{color:var(--warn); border-color:var(--warn)}
+
+/* manual override inside the scan modal */
+.scanManual{margin-top:.9rem; text-align:center}
+.scanManual summary{
+  cursor:pointer; font-family:var(--mono); font-size:.68rem;
+  letter-spacing:.08em; text-transform:uppercase; color:var(--muted-2);
+  list-style:none; transition:.15s;
+}
+.scanManual summary:hover{color:var(--muted)}
+.scanManual summary::-webkit-details-marker{display:none}
+.scanManual .manualRow{display:flex; gap:.5rem; justify-content:center; margin-top:.7rem}

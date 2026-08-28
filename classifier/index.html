@@ -100,6 +100,17 @@
     <div class="scanModalActions">
       <button id="present" class="btnScanModal">Scan Item</button>
       <p class="scanModalHint" id="scanModalHint">Point camera at item to identify</p>
+
+      <!-- Escape hatch: publishes a classification with no camera and no model,
+           so a demonstration survives a dead webcam or a dead network. -->
+      <details class="scanManual">
+        <summary>Camera not working? Override manually</summary>
+        <div class="manualRow">
+          <button class="btn btn--sm" data-manual="BIODEGRADABLE">BIO</button>
+          <button class="btn btn--sm" data-manual="RECYCLABLE">REC</button>
+          <button class="btn btn--sm" data-manual="NON_RECYCLABLE">NON</button>
+        </div>
+      </details>
     </div>
 
     <!-- Hidden compatibility DOM nodes -->

@@ -1,89 +1,121 @@
-# Smart Waste Management — Prototype / Simulation
+# Zura — Smart Waste Bins
 
-Outline item #9 for the IT-Elective 3 project (BSIT 4D, University of Cebu LM).
+Prototype / simulation for the IT-Elective 3 project (BSIT 4D, University of
+Cebu LM). This is **outline item #9**, which the project document lists but
+never delivered.
 
 Two halves joined by real MQTT:
 
 ```
-  laptop webcam                          Wokwi (real ESP32 firmware)
-  ┌──────────────────┐                   ┌────────────────────────┐
-  │ classifier page  │   MQTT over ws    │ 3 × HC-SR04  fill      │
-  │ Gemini / TM      │ ────────────────▶ │ 3 × servo    lid lock  │
-  │ picks the class  │  broker.hivemq    │ 6 × LED      status    │
-  └──────────────────┘        .com       │ 1 × pot      gas       │
-                                         └────────────────────────┘
+  browser (your laptop)                    Wokwi (real ESP32 firmware)
+  ┌────────────────────────┐               ┌────────────────────────┐
+  │ tap a bin → camera     │  MQTT over ws │ 3 × HC-SR04  fill      │
+  │ Groq / Gemini decides  │ ─────────────▶│ 3 × servo    lid lock  │
+  │ BIO / REC / NON        │ broker.hivemq │ 6 × LED      status    │
+  │                        │◀───────────── │ 1 × pot      gas       │
+  │ bins show live state   │   telemetry   └────────────────────────┘
+  └────────────────────────┘
 ```
 
-## 1. Run the classifier
+## 1. Run the web app
 
 ```
 classifier\serve.bat
 ```
 
-Opens `http://localhost:8000`. **Do not open `index.html` directly** — Chrome
-blocks camera access on `file://`.
+It opens `http://localhost:8000` for you. **Do not open `index.html`
+directly** — Chrome blocks camera access on `file://`.
 
-Pick a classifier in the settings bar at the bottom:
+> `serve.bat` runs `serve.py`, which binds dual-stack on purpose. Windows
+> resolves `localhost` to `::1` before `127.0.0.1`, and an IPv4-only server
+> makes the browser fail with `ERR_EMPTY_RESPONSE` even though
+> `http://127.0.0.1:8000` works. It also sends no-cache headers so your edits
+> show up on reload.
 
-| Provider | Needs | Notes |
-| --- | --- | --- |
-| **Gemini** (default) | free API key from [aistudio.google.com](https://aistudio.google.com) | Best accuracy. On-demand only — free tier is 5–15 requests/min. |
-| **Teachable Machine** | an exported model in `classifier\model\` | Runs offline at ~5 fps. Use this if the venue has no wifi. |
-| **MobileNet heuristic** | internet on first load | Placeholder only. Labelled untrained in the UI. |
+## 2. Pick a classifier
 
-The API key is stored in your browser's `localStorage`. It is never written to
-a file here and never committed.
+Settings bar along the bottom of the page.
 
-## 2. Run the bin controller
+| Provider | Model | Needs | Notes |
+| --- | --- | --- | --- |
+| **Groq** (default) | `qwen/qwen3.8-27b` | free key from [console.groq.com](https://console.groq.com/keys) | Verified working. On-demand only. |
+| **Gemini** | `gemini-2.5-flash` | free key from [aistudio.google.com](https://aistudio.google.com) | Free tier is 5–15 requests/min. |
+| **Teachable Machine** | your own | an exported model in `classifier\model\` | Runs offline at ~5 fps. Use this if the venue has no wifi. |
+| **MobileNet heuristic** | — | internet on first load | Placeholder only, labelled untrained in the UI. |
+
+Keys live in your browser's `localStorage`, one per provider. **No key is ever
+written to a file in this repository.** A key in a web page is readable by
+anyone using that page, so use a restricted key and rotate it if it leaks.
+
+Do **not** move the Groq model back to `qwen/qwen3.6-27b` — it fails JSON
+validation. Llama 4 Scout and Maverick are not available on the free tier.
+
+## 3. Run the bin controller
 
 Open [wokwi.com](https://wokwi.com) → new ESP32 project, then paste in:
 
-- `firmware/smart_bin.ino` → the sketch tab
-- `firmware/diagram.json` → the diagram tab
-- `firmware/libraries.txt` → the library manager
+| File | Where it goes |
+| --- | --- |
+| `firmware/smart_bin.ino` | the sketch tab |
+| `firmware/diagram.json` | the diagram tab |
+| `firmware/libraries.txt` | the library manager |
 
 Press play. The serial monitor shows the connection and every decision.
 
-## 3. Demonstrate
+> `diagram.json` uses `board-esp32-devkit-v1`. If you start from a
+> `devkit-c-v4` project the pin labels differ and the wiring will not match.
 
-**With the camera:** pick a target bin on the page, hold an item to the webcam,
-press *Present item*. A match opens that bin's lid and lights its green LED; a
-mismatch keeps it locked and lights red. Drag any HC-SR04's distance slider to
-change fill level — below 6 cm the bin reports FULL and refuses everything.
+## 4. Demonstrate
 
-**Without the network:** press the Wokwi buttons instead.
+**With the camera:** tap a bin → its camera opens → hold an item up → press
+**Scan Item**. A match unlocks that bin's lid and lights its green LED; a
+mismatch keeps it locked and lights red. The model's one-line reason appears
+under the button.
 
-- **GPIO27 (blue)** — change which bin is being approached
-- **GPIO23 (yellow)** — present an item, cycling BIO → REC → NON each press
+Drag any HC-SR04's distance slider in Wokwi to change fill level. Past 85% the
+bin reports FULL, refuses everything, and stops being tappable.
+
+**Without a camera:** *Camera not working? Override manually* inside the scan
+modal publishes a classification with no camera and no model.
+
+**Without a network:** use the Wokwi buttons.
+
+- **GPIO27** — change which bin is being approached
+- **GPIO23** — present an item, cycling BIO → REC → NON each press
 
 Three presses on any bin therefore show reject, accept, reject in order.
 
-## 4. Watch the telemetry
+## 5. Watch the telemetry
 
-Open the [HiveMQ web client](https://www.hivemq.com/demos/websocket-client/)
-and subscribe to:
+The **Circuit** tab shows per-bin pin assignments, live fill, gas, lid state,
+the last admission event, and raw MQTT traffic.
 
-```
-uc-swm-4d/station01/#
-```
-
-You will see `telemetry` every 5 s per bin, plus `event` messages for
-ACCEPT / REJECT / FULL.
+For an external view, open the
+[HiveMQ web client](https://www.hivemq.com/demos/websocket-client/) and
+subscribe to `uc-swm-4d/station01/#`.
 
 ## Layout
 
 ```
-classifier/    webcam classifier page (Gemini / Teachable Machine / MobileNet)
-  vendor/      TF.js, Teachable Machine, MQTT.js, MobileNet — vendored for offline use
+classifier/    the web app
+  index.html   bins → scan modal → circuit tab
+  app.js       classifiers, MQTT, views
+  serve.py     dual-stack static server
+  vendor/      TF.js, Teachable Machine, MQTT.js, MobileNet (offline copies)
   model/       drop an exported Teachable Machine model here
 firmware/      ESP32 station controller for Wokwi
 docs/          design spec
 ```
 
-## Known limitations
+## Honesty notes for the paper
 
-Stated in full in `docs/superpowers/specs/2026-08-28-smart-waste-simulation-design.md` §8.
-The short version: classification runs off-device rather than on an ESP32-CAM,
-the API key is visible in the browser, the public broker has no auth or TLS, and
-Wokwi does not model power draw — so the "intermittent resets from solenoid
-spikes" entry in the troubleshooting guide cannot be reproduced here.
+- Classification runs on the laptop, not on an ESP32-CAM. This matches the
+  cloud-upload path the project document specifies on p9, but not the
+  on-device Edge ML path on p11.
+- One ESP32 controls all three bins; the hardware list implies one per bin.
+- One camera plus a bin selector stands in for three separate intake scanners.
+- The public MQTT broker has no authentication and no TLS.
+- Wokwi does not model power draw, so the "intermittent resets from solenoid
+  spikes" entry in the troubleshooting guide cannot be reproduced.
+
+Full detail in `docs/superpowers/specs/2026-08-28-smart-waste-simulation-design.md` §8.
