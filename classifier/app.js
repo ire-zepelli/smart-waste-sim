@@ -27,12 +27,62 @@
 const BINS = ['BIODEGRADABLE', 'RECYCLABLE', 'NON_RECYCLABLE'];
 
 const META = {
-  BIODEGRADABLE:  { short: 'BIO', key: 'bio', name: 'Biodegradable', icon: '🌿',
-                    hint: 'Food scraps, peel, garden waste' },
-  RECYCLABLE:     { short: 'REC', key: 'rec', name: 'Recyclable', icon: '♻️',
-                    hint: 'Bottles, cans, clean paper, glass' },
-  NON_RECYCLABLE: { short: 'NON', key: 'non', name: 'Non-recyclable', icon: '🚫',
-                    hint: 'Sachets, styrofoam, nappies' },
+  BIODEGRADABLE:  {
+    short: 'BIO', key: 'bio', name: 'Biodegradable',
+    iconSvg: `<svg class="binIconSvg" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <g stroke="#000000" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M32 58V10"/>
+        <path d="M32 20C32 20 20 12 12 18C12 28 22 32 32 32"/>
+        <path d="M32 20C32 20 44 12 52 18C52 28 42 32 32 32"/>
+        <path d="M32 32C32 32 22 26 14 30C14 38 22 42 32 42"/>
+        <path d="M32 32C32 32 42 26 50 30C50 38 42 42 32 42"/>
+        <path d="M32 10C32 10 24 4 18 8C18 15 25 18 32 18"/>
+        <path d="M32 10C32 10 40 4 46 8C46 15 39 18 32 18"/>
+      </g>
+      <g stroke="#4ade80" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" fill="none">
+        <path d="M32 58V10"/>
+        <path d="M32 20C32 20 20 12 12 18C12 28 22 32 32 32"/>
+        <path d="M32 20C32 20 44 12 52 18C52 28 42 32 32 32"/>
+        <path d="M32 32C32 32 22 26 14 30C14 38 22 42 32 42"/>
+        <path d="M32 32C32 32 42 26 50 30C50 38 42 42 32 42"/>
+        <path d="M32 10C32 10 24 4 18 8C18 15 25 18 32 18"/>
+        <path d="M32 10C32 10 40 4 46 8C46 15 39 18 32 18"/>
+      </g>
+    </svg>`,
+    icon: '🌿', hint: 'Food scraps, peel, garden waste'
+  },
+  RECYCLABLE:     {
+    short: 'REC', key: 'rec', name: 'Recyclable',
+    iconSvg: `<svg class="binIconSvg" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <g stroke="#000000" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M26 12L32 4L38 12"/>
+        <path d="M32 4V24C32 24 32 30 40 30H54"/>
+        <path d="M46 40L54 48L46 56"/>
+        <path d="M54 48H36C36 48 30 48 26 40L18 26"/>
+        <path d="M18 36L10 28L18 20"/>
+        <path d="M10 28H24C24 28 30 28 34 20L42 6"/>
+      </g>
+      <g stroke="#60a5fa" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M26 12L32 4L38 12"/>
+        <path d="M32 4V24C32 24 32 30 40 30H54"/>
+        <path d="M46 40L54 48L46 56"/>
+        <path d="M54 48H36C36 48 30 48 26 40L18 26"/>
+        <path d="M18 36L10 28L18 20"/>
+        <path d="M10 28H24C24 28 30 28 34 20L42 6"/>
+      </g>
+    </svg>`,
+    icon: '♻️', hint: 'Bottles, cans, clean paper, glass'
+  },
+  NON_RECYCLABLE: {
+    short: 'NON', key: 'non', name: 'Non-Recyclable',
+    iconSvg: `<svg class="binIconSvg" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="32" cy="32" r="22" fill="#ffffff" stroke="#000000" stroke-width="7"/>
+      <circle cx="32" cy="32" r="22" stroke="#ea580c" stroke-width="5"/>
+      <line x1="16" y1="16" x2="48" y2="48" stroke="#000000" stroke-width="8"/>
+      <line x1="16" y1="16" x2="48" y2="48" stroke="#ea580c" stroke-width="5"/>
+    </svg>`,
+    icon: '🚫', hint: 'Sachets, styrofoam, nappies'
+  },
 };
 const SHORT = Object.fromEntries(BINS.map((b) => [b, META[b].short]));
 const BY_KEY = Object.fromEntries(BINS.map((b) => [META[b].key, b]));
@@ -530,13 +580,14 @@ function binView(binClass) {
 }
 
 function capBlock(s, live, full) {
+  const pct = live && s.fill != null ? s.fill : 0;
   return `
     <div class="cap">
       <div class="cap__head">
-        <span class="cap__k">Capacity</span>
-        <span class="cap__v">${live ? s.fill + '%' : '—'}</span>
+        <span class="cap__k">CAPACITY</span>
+        <span class="cap__v">${pct}%</span>
       </div>
-      <div class="cap__track"><div class="cap__fill" style="width:${live ? s.fill : 0}%"></div></div>
+      <div class="cap__track"><div class="cap__fill" style="width:${pct}%"></div></div>
     </div>`;
 }
 
@@ -553,16 +604,11 @@ function renderBinCards() {
     card.dataset.tone = m.key;
     card.type = 'button';
 
-    const state = !seen ? 'awaiting telemetry'
-      : stale ? 'controller silent' : full ? 'full — not accepting' : 'ready to scan';
-
     card.innerHTML = `
-      <span class="binCard__icon">${m.icon}</span>
+      <div class="binCard__icon">${m.iconSvg || m.icon}</div>
       <h3 class="binCard__name">${m.name}</h3>
-      <p class="binCard__count">${s.collected} item${s.collected === 1 ? '' : 's'} collected</p>
-      <p class="binCard__hint">${m.hint}</p>
-      ${capBlock(s, live, full)}
-      <span class="binCard__state">${state}</span>`;
+      <p class="binCard__count">${s.collected} items collected</p>
+      ${capBlock(s, live, full)}`;
     el.binCards.append(card);
   }
   updateHeader();

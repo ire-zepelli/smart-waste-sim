@@ -1,187 +1,197 @@
 <!doctype html>
 <html lang="en">
+
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SmartSort — Waste Sorting System</title>
-<link rel="stylesheet" href="styles.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Zura — Smart Waste Bins</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
 
-<header class="bar">
-  <div class="brand">
-    <span class="logo" aria-hidden="true">♻</span>
-    <div>
-      <h1>SmartSort</h1>
-      <p class="brandSub">Waste Sorting System</p>
+  <header class="bar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="22" height="22" stroke="currentColor" stroke-width="2.5" fill="none"
+          stroke-linecap="round" stroke-linejoin="round">
+          <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.4 19 2c1 2 2 4.1 1.4 9-1 7.6-8.6 9-9.4 9Z" />
+          <path d="M12 20v-8" />
+        </svg>
+      </div>
+      <div>
+        <h1>Zura</h1>
+        <p class="brandSub">Smart Waste Bin</p>
+      </div>
     </div>
-  </div>
 
-  <nav class="tabs" role="tablist">
-    <button class="tab tab--on" data-view="station" role="tab" aria-selected="true">Bins</button>
-    <button class="tab" data-view="circuit" role="tab" aria-selected="false">Circuit</button>
-  </nav>
+    <nav class="tabs" role="tablist">
+      <button class="tab tab--on" data-view="station" role="tab" aria-selected="true">Bins</button>
+      <button class="tab" data-view="circuit" role="tab" aria-selected="false">Circuit</button>
+    </nav>
 
-  <div class="meta">
-    <div class="total">
-      <span class="total__k">Total sorted</span>
-      <span class="total__v" id="totalSorted">0</span>
+    <div class="meta">
+      <div class="total">
+        <span class="total__k">TOTAL SORTED</span>
+        <span class="total__v" id="totalSorted">0</span>
+      </div>
+      <span class="statusDot statusDot--ok" id="statusDot" title="connected"></span>
     </div>
-    <span class="statusDot statusDot--warn" id="statusDot" title="connecting"></span>
-  </div>
-</header>
+  </header>
 
-<!-- ══ station ══════════════════════════════════════════════════════════ -->
-<section id="view-station" class="view">
-  <div class="hero">
-    <h2 class="hero__title">Sort your waste<br><span class="grad">intelligently.</span></h2>
-    <p class="hero__sub">Tap a bin, point your camera at the item, and let the scanner verify it belongs there.</p>
-  </div>
-  <div id="binCards" class="binCards"></div>
-  <p class="foot-note">
-    Capacity and lock state come from the ESP32 over MQTT. With no telemetry the
-    bins grey out rather than showing stale numbers as if they were live.
-  </p>
-</section>
-
-<!-- ══ scanner ══════════════════════════════════════════════════════════ -->
-<section id="view-scanner" class="view" hidden>
-  <button id="backToBins" class="btn btn--ghost">&larr; All bins</button>
-
-  <div class="scanHead">
-    <span id="scanIcon" class="scanIcon" aria-hidden="true">♻</span>
-    <div>
-      <h2 id="scanTitle" class="scanTitle">Recyclable</h2>
-      <p id="scanSub" class="scanSub">Present an item to this bin</p>
+  <!-- ══ station ══════════════════════════════════════════════════════════ -->
+  <section id="view-station" class="view">
+    <div class="hero">
+      <h2 class="hero__title">Sort your waste<br><span class="grad">intelligently.</span></h2>
+      <p class="hero__sub">Tap a bin, point your camera at the item, and let the scanner verify it belongs there.</p>
     </div>
-  </div>
+    <div id="binCards" class="binCards"></div>
+  </section>
 
-  <div class="scanGrid">
-    <div class="panel">
-      <div class="videoWrap">
-        <video id="cam" autoplay playsinline muted></video>
-        <div id="camOverlay" class="camOverlay">
-          <p>Camera is off</p>
-          <button id="startCam" class="btn btn--primary">Start camera</button>
+  <!-- ══ scanner ══════════════════════════════════════════════════════════ -->
+  <section id="view-scanner" class="view" hidden>
+    <button id="backToBins" class="btn btn--ghost">&larr; All bins</button>
+
+    <div class="scanHead">
+      <span id="scanIcon" class="scanIcon" aria-hidden="true">♻</span>
+      <div>
+        <h2 id="scanTitle" class="scanTitle">Recyclable</h2>
+        <p id="scanSub" class="scanSub">Present an item to this bin</p>
+      </div>
+    </div>
+
+    <div class="scanGrid">
+      <div class="panel">
+        <div class="videoWrap">
+          <video id="cam" autoplay playsinline muted></video>
+          <div id="camOverlay" class="camOverlay">
+            <p>Camera is off</p>
+            <button id="startCam" class="btn btn--primary">Start camera</button>
+          </div>
+        </div>
+        <div class="camRow">
+          <select id="camSelect" class="select" aria-label="Camera device"></select>
+          <button id="stopCam" class="btn" disabled>Stop</button>
         </div>
       </div>
-      <div class="camRow">
-        <select id="camSelect" class="select" aria-label="Camera device"></select>
-        <button id="stopCam" class="btn" disabled>Stop</button>
+
+      <div class="panel">
+        <h3 class="h2">Live classification</h3>
+        <div id="bars" class="bars"></div>
+
+        <div id="verdict" class="verdict verdict--idle">
+          <span class="verdict__label">Waiting</span>
+          <span class="verdict__why">Start the camera</span>
+          <span class="verdict__item" id="verdictItem" hidden></span>
+        </div>
+
+        <div class="actions">
+          <button id="present" class="btn btn--primary btn--big" disabled>Present item</button>
+          <label class="check"><input type="checkbox" id="autoPresent"> Auto-present when stable</label>
+        </div>
+
+        <details class="manual">
+          <summary>Manual override (no camera)</summary>
+          <p class="hint">Publishes a classification without the model. Use if the camera fails mid-demonstration.</p>
+          <div class="manualRow">
+            <button class="btn btn--sm" data-manual="BIODEGRADABLE">BIO</button>
+            <button class="btn btn--sm" data-manual="RECYCLABLE">REC</button>
+            <button class="btn btn--sm" data-manual="NON_RECYCLABLE">NON</button>
+          </div>
+        </details>
       </div>
     </div>
+  </section>
+
+  <!-- ══ circuit ══════════════════════════════════════════════════════════ -->
+  <section id="view-circuit" class="view" hidden>
+    <div class="circuitHead">
+      <div>
+        <h2 class="circuitTitle">Station 01 — live circuit</h2>
+        <p class="circuitSub">
+          One ESP32 drives all three bin units. Pin assignments match
+          <code>firmware/smart_bin.ino</code> exactly.
+        </p>
+      </div>
+      <div class="pills">
+        <span id="modelPill" class="pill pill--warn">model: loading…</span>
+        <span id="mqttPill" class="pill pill--warn">broker: connecting…</span>
+        <span id="stationPill" class="pill pill--warn">no telemetry yet</span>
+      </div>
+    </div>
+
+    <div id="circuitCards" class="binCards"></div>
+
+    <p class="circuitFoot">
+      Shared: MQ-135 stand-in on <code>GPIO39 / VN</code> (ADC1 — ADC2 is unusable
+      while WiFi is active). Buttons on <code>GPIO27</code> change bin and
+      <code>GPIO23</code> presents an item.
+    </p>
 
     <div class="panel">
-      <h3 class="h2">Live classification</h3>
-      <div id="bars" class="bars"></div>
-
-      <div id="verdict" class="verdict verdict--idle">
-        <span class="verdict__label">Waiting</span>
-        <span class="verdict__why">Start the camera</span>
-        <span class="verdict__item" id="verdictItem" hidden></span>
+      <div class="logHead">
+        <h3 class="h2">MQTT traffic</h3>
+        <button id="clearLog" class="btn btn--sm">Clear</button>
       </div>
-
-      <div class="actions">
-        <button id="present" class="btn btn--primary btn--big" disabled>Present item</button>
-        <label class="check"><input type="checkbox" id="autoPresent"> Auto-present when stable</label>
-      </div>
-
-      <details class="manual">
-        <summary>Manual override (no camera)</summary>
-        <p class="hint">Publishes a classification without the model. Use if the camera fails mid-demonstration.</p>
-        <div class="manualRow">
-          <button class="btn btn--sm" data-manual="BIODEGRADABLE">BIO</button>
-          <button class="btn btn--sm" data-manual="RECYCLABLE">REC</button>
-          <button class="btn btn--sm" data-manual="NON_RECYCLABLE">NON</button>
-        </div>
-      </details>
+      <ol id="log" class="log" aria-live="polite"></ol>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- ══ circuit ══════════════════════════════════════════════════════════ -->
-<section id="view-circuit" class="view" hidden>
-  <div class="circuitHead">
-    <div>
-      <h2 class="circuitTitle">Station 01 — live circuit</h2>
-      <p class="circuitSub">
-        One ESP32 drives all three bin units. Pin assignments match
-        <code>firmware/smart_bin.ino</code> exactly.
+  <footer class="foot">
+    <div class="footRow">
+      <label>Classifier
+        <select id="cfgProvider" class="input input--m">
+          <option value="gemini">Gemini API (cloud vision)</option>
+          <option value="teachable">Teachable Machine (./model/)</option>
+          <option value="mobilenet">MobileNet heuristic (untrained)</option>
+        </select>
+      </label>
+      <label class="geminiOnly">Gemini model
+        <input id="cfgGeminiModel" class="input input--m" value="gemini-2.5-flash">
+      </label>
+      <label class="geminiOnly">API key
+        <input id="cfgKey" class="input" type="password" placeholder="paste key — stored in this browser only">
+      </label>
+      <label>Min confidence
+        <input id="cfgConf" class="input input--n" type="number" min="0" max="1" step="0.05" value="0.70">
+      </label>
+    </div>
+    <div class="footRow">
+      <label>Broker <input id="cfgBroker" class="input" value="ws://broker.hivemq.com:8000/mqtt"></label>
+      <label>Topic root <input id="cfgTopic" class="input" value="uc-swm-4d/station01"></label>
+      <button id="reconnect" class="btn btn--sm">Reconnect</button>
+      <p class="warn geminiOnly">
+        A key in a web page is readable by anyone using it. Use a restricted key, and never commit it.
       </p>
     </div>
-    <div class="pills">
-      <span id="modelPill" class="pill pill--warn">model: loading…</span>
-      <span id="mqttPill" class="pill pill--warn">broker: connecting…</span>
-      <span id="stationPill" class="pill pill--warn">no telemetry yet</span>
-    </div>
-  </div>
+  </footer>
 
-  <div id="circuitCards" class="binCards"></div>
-
-  <p class="circuitFoot">
-    Shared: MQ-135 stand-in on <code>GPIO39 / VN</code> (ADC1 — ADC2 is unusable
-    while WiFi is active). Buttons on <code>GPIO27</code> change bin and
-    <code>GPIO23</code> presents an item.
-  </p>
-
-  <div class="panel">
-    <div class="logHead">
-      <h3 class="h2">MQTT traffic</h3>
-      <button id="clearLog" class="btn btn--sm">Clear</button>
-    </div>
-    <ol id="log" class="log" aria-live="polite"></ol>
-  </div>
-</section>
-
-<footer class="foot">
-  <div class="footRow">
-    <label>Classifier
-      <select id="cfgProvider" class="input input--m">
-        <option value="gemini">Gemini API (cloud vision)</option>
-        <option value="teachable">Teachable Machine (./model/)</option>
-        <option value="mobilenet">MobileNet heuristic (untrained)</option>
-      </select>
-    </label>
-    <label class="geminiOnly">Gemini model
-      <input id="cfgGeminiModel" class="input input--m" value="gemini-2.5-flash">
-    </label>
-    <label class="geminiOnly">API key
-      <input id="cfgKey" class="input" type="password" placeholder="paste key — stored in this browser only">
-    </label>
-    <label>Min confidence
-      <input id="cfgConf" class="input input--n" type="number" min="0" max="1" step="0.05" value="0.70">
-    </label>
-  </div>
-  <div class="footRow">
-    <label>Broker <input id="cfgBroker" class="input" value="ws://broker.hivemq.com:8000/mqtt"></label>
-    <label>Topic root <input id="cfgTopic" class="input" value="uc-swm-4d/station01"></label>
-    <button id="reconnect" class="btn btn--sm">Reconnect</button>
-    <p class="warn geminiOnly">
-      A key in a web page is readable by anyone using it. Use a restricted key, and never commit it.
+  <button id="helpBtn" class="helpBtn" aria-label="How this works">?</button>
+  <div id="helpPanel" class="helpPanel" hidden>
+    <h3>How this works</h3>
+    <ol>
+      <li>Tap a bin. Its camera opens.</li>
+      <li>Hold an item to the camera and press <strong>Present item</strong>.</li>
+      <li>The classifier decides, then publishes over MQTT.</li>
+      <li>The ESP32 unlocks that lid only on a match — otherwise it stays locked and the red LED lights.</li>
+    </ol>
+    <p class="helpFoot">
+      Capacity comes from the ultrasonic sensors. A bin at 85% reports FULL and
+      refuses everything, regardless of what you present.
     </p>
+    <button id="helpClose" class="btn btn--sm">Close</button>
   </div>
-</footer>
 
-<button id="helpBtn" class="helpBtn" aria-label="How this works">?</button>
-<div id="helpPanel" class="helpPanel" hidden>
-  <h3>How this works</h3>
-  <ol>
-    <li>Tap a bin. Its camera opens.</li>
-    <li>Hold an item to the camera and press <strong>Present item</strong>.</li>
-    <li>The classifier decides, then publishes over MQTT.</li>
-    <li>The ESP32 unlocks that lid only on a match — otherwise it stays locked and the red LED lights.</li>
-  </ol>
-  <p class="helpFoot">
-    Capacity comes from the ultrasonic sensors. A bin at 85% reports FULL and
-    refuses everything, regardless of what you present.
-  </p>
-  <button id="helpClose" class="btn btn--sm">Close</button>
-</div>
-
-<script src="vendor/tf.min.js"></script>
-<script src="vendor/teachablemachine-image.min.js"></script>
-<script src="vendor/mobilenet.min.js"></script>
-<script src="vendor/mqtt.min.js"></script>
-<script src="app.js"></script>
+  <script src="vendor/tf.min.js"></script>
+  <script src="vendor/teachablemachine-image.min.js"></script>
+  <script src="vendor/mobilenet.min.js"></script>
+  <script src="vendor/mqtt.min.js"></script>
+  <script src="app.js"></script>
 </body>
+
 </html>
