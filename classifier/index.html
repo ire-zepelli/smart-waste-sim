@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Waste — Classifier Node</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="bar">
+  <div class="brand">
+    <span class="dot"></span>
+    <div>
+      <h1>Segregation Admission Control</h1>
+      <p class="sub">Station 01 &middot; classifier node</p>
+    </div>
+  </div>
+  <div class="pills">
+    <span id="modelPill" class="pill pill--warn">model: loading…</span>
+    <span id="mqttPill" class="pill pill--warn">broker: connecting…</span>
+  </div>
+</header>
+
+<main>
+  <!-- ── camera ───────────────────────────────────────────── -->
+  <section class="panel panel--cam">
+    <div class="videoWrap">
+      <video id="cam" autoplay playsinline muted></video>
+      <div id="camOverlay" class="camOverlay">
+        <p>Camera is off</p>
+        <button id="startCam" class="btn btn--primary">Start camera</button>
+      </div>
+    </div>
+    <div class="camRow">
+      <select id="camSelect" class="select" aria-label="Camera device"></select>
+      <button id="stopCam" class="btn" disabled>Stop</button>
+    </div>
+  </section>
+
+  <!-- ── decision ─────────────────────────────────────────── -->
+  <section class="panel panel--decide">
+
+    <h2 class="h2">Presenting to bin</h2>
+    <div class="bins" id="bins" role="radiogroup" aria-label="Target bin">
+      <button class="bin" data-bin="BIODEGRADABLE" role="radio" aria-checked="false">
+        <span class="bin__k">Biodegradable</span><span class="bin__t">BIO</span>
+      </button>
+      <button class="bin" data-bin="RECYCLABLE" role="radio" aria-checked="false">
+        <span class="bin__k">Recyclable</span><span class="bin__t">REC</span>
+      </button>
+      <button class="bin" data-bin="NON_RECYCLABLE" role="radio" aria-checked="false">
+        <span class="bin__k">Non-recyclable</span><span class="bin__t">NON</span>
+      </button>
+    </div>
+
+    <h2 class="h2">Live classification</h2>
+    <div id="bars" class="bars"></div>
+
+    <div id="verdict" class="verdict verdict--idle">
+      <span class="verdict__label">Waiting</span>
+      <span class="verdict__why">Start the camera and pick a bin</span>
+      <span class="verdict__item" id="verdictItem" hidden></span>
+    </div>
+
+    <div class="actions">
+      <button id="present" class="btn btn--primary btn--big" disabled>Present item</button>
+      <label class="check">
+        <input type="checkbox" id="autoPresent"> Auto-present when stable
+      </label>
+    </div>
+
+    <details class="manual">
+      <summary>Manual override (no camera)</summary>
+      <p class="hint">Publishes a classification without the model. Use if the camera fails mid-demonstration.</p>
+      <div class="manualRow">
+        <button class="btn btn--sm" data-manual="BIODEGRADABLE">BIO</button>
+        <button class="btn btn--sm" data-manual="RECYCLABLE">REC</button>
+        <button class="btn btn--sm" data-manual="NON_RECYCLABLE">NON</button>
+      </div>
+    </details>
+  </section>
+
+  <!-- ── telemetry ────────────────────────────────────────── -->
+  <section class="panel panel--log">
+    <div class="logHead">
+      <h2 class="h2">Published</h2>
+      <button id="clearLog" class="btn btn--sm">Clear</button>
+    </div>
+    <ol id="log" class="log" aria-live="polite"></ol>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="footRow">
+    <label>Classifier
+      <select id="cfgProvider" class="input input--m">
+        <option value="gemini">Gemini API (cloud vision)</option>
+        <option value="teachable">Teachable Machine (./model/)</option>
+        <option value="mobilenet">MobileNet heuristic (untrained)</option>
+      </select>
+    </label>
+    <label class="geminiOnly">Gemini model
+      <input id="cfgGeminiModel" class="input input--m" value="gemini-2.5-flash">
+    </label>
+    <label class="geminiOnly">API key
+      <input id="cfgKey" class="input" type="password" placeholder="paste key — stored in this browser only">
+    </label>
+    <label>Min confidence
+      <input id="cfgConf" class="input input--n" type="number" min="0" max="1" step="0.05" value="0.70">
+    </label>
+  </div>
+  <div class="footRow">
+    <label>Broker <input id="cfgBroker" class="input" value="ws://broker.hivemq.com:8000/mqtt"></label>
+    <label>Topic root <input id="cfgTopic" class="input" value="uc-swm-4d/station01"></label>
+    <button id="reconnect" class="btn btn--sm">Reconnect</button>
+    <p class="warn geminiOnly">
+      A key in a web page is readable by anyone using it. Use a restricted key, and never commit it.
+    </p>
+  </div>
+</footer>
+
+<script src="vendor/tf.min.js"></script>
+<script src="vendor/teachablemachine-image.min.js"></script>
+<script src="vendor/mobilenet.min.js"></script>
+<script src="vendor/mqtt.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,2 +1,6 @@
 classifier/model/*
 !classifier/model/.gitkeep
+
+# never commit credentials
+*.key
+.env

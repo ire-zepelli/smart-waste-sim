@@ -1,0 +1,173 @@
+/* Smart Waste — classifier node.
+   Sized for a projector: large type, heavy weights, high contrast. */
+
+:root{
+  --bg:#0d1117; --panel:#161b22; --line:#2a323d;
+  --ink:#e8edf3; --muted:#8b98a8;
+  --ok:#2ea043; --ok-dim:#132d1c;
+  --bad:#e5534b; --bad-dim:#3a1614;
+  --warn:#d29922; --warn-dim:#332708;
+  --accent:#3b82f6;
+  --bio:#a3702a; --rec:#2f81f7; --non:#6e7781;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  background:var(--bg); color:var(--ink);
+  font:16px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  display:flex; flex-direction:column; min-height:100vh;
+}
+
+/* ── header ─────────────────────────────────────────────── */
+.bar{
+  display:flex; align-items:center; justify-content:space-between; gap:1rem;
+  flex-wrap:wrap; padding:.9rem 1.25rem;
+  background:var(--panel); border-bottom:1px solid var(--line);
+}
+.brand{display:flex; align-items:center; gap:.75rem}
+.brand h1{margin:0; font-size:1.15rem; letter-spacing:-.01em}
+.sub{margin:0; color:var(--muted); font-size:.8rem}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px var(--ok-dim)}
+.pills{display:flex; gap:.5rem; flex-wrap:wrap}
+.pill{
+  font-size:.78rem; font-weight:600; padding:.35rem .7rem; border-radius:999px;
+  border:1px solid var(--line); background:#0b0f14; white-space:nowrap;
+}
+.pill--ok{color:var(--ok); border-color:#1d572c; background:var(--ok-dim)}
+.pill--bad{color:var(--bad); border-color:#5f2320; background:var(--bad-dim)}
+.pill--warn{color:var(--warn); border-color:#4b3a10; background:var(--warn-dim)}
+
+/* ── layout ─────────────────────────────────────────────── */
+main{
+  flex:1; display:grid; gap:1rem; padding:1rem;
+  grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);
+  grid-template-areas:"cam decide" "log log";
+  align-items:start;
+}
+@media (max-width:900px){
+  main{grid-template-columns:1fr; grid-template-areas:"cam" "decide" "log"}
+}
+.panel{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:1rem}
+.panel--cam{grid-area:cam} .panel--decide{grid-area:decide} .panel--log{grid-area:log}
+
+.h2{margin:0 0 .6rem; font-size:.78rem; text-transform:uppercase;
+    letter-spacing:.09em; color:var(--muted); font-weight:700}
+.panel--decide .h2:not(:first-child){margin-top:1.25rem}
+
+/* ── camera ─────────────────────────────────────────────── */
+.videoWrap{position:relative; background:#000; border-radius:8px; overflow:hidden; aspect-ratio:4/3}
+#cam{width:100%; height:100%; object-fit:cover; display:block; transform:scaleX(-1)}
+.camOverlay{
+  position:absolute; inset:0; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:1rem;
+  background:rgba(13,17,23,.92); color:var(--muted);
+}
+.camOverlay[hidden]{display:none}
+.camOverlay p{margin:0}
+.camRow{display:flex; gap:.5rem; margin-top:.75rem}
+.select{
+  flex:1; min-width:0; background:#0b0f14; color:var(--ink);
+  border:1px solid var(--line); border-radius:8px; padding:.5rem .6rem; font-size:.85rem;
+}
+
+/* ── bins ───────────────────────────────────────────────── */
+.bins{display:grid; grid-template-columns:repeat(3,1fr); gap:.5rem}
+.bin{
+  display:flex; flex-direction:column; align-items:center; gap:.2rem;
+  padding:.75rem .4rem; cursor:pointer; border-radius:10px;
+  background:#0b0f14; border:2px solid var(--line); color:var(--muted);
+  font-family:inherit; transition:.12s;
+}
+.bin:hover{border-color:#40506a; color:var(--ink)}
+.bin__k{font-size:.8rem; font-weight:600; text-align:center; line-height:1.2}
+.bin__t{font-size:1.35rem; font-weight:800; letter-spacing:.04em}
+.bin[aria-checked="true"]{color:var(--ink); background:#0e1b2e; border-color:var(--accent)}
+
+/* ── confidence bars ────────────────────────────────────── */
+.bars{display:flex; flex-direction:column; gap:.5rem; min-height:3rem}
+.row{display:grid; grid-template-columns:9rem 1fr 3.4rem; gap:.6rem; align-items:center}
+.row__k{font-size:.85rem; font-weight:600; color:var(--muted);
+        overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.row--top .row__k{color:var(--ink)}
+.track{height:14px; background:#0b0f14; border-radius:999px; overflow:hidden; border:1px solid var(--line)}
+.fill{height:100%; width:0; border-radius:999px; background:#30363d; transition:width .12s linear}
+.row--top .fill{background:var(--accent)}
+.row__v{font-size:.85rem; font-variant-numeric:tabular-nums; text-align:right; color:var(--muted)}
+.row--top .row__v{color:var(--ink); font-weight:700}
+.empty{color:var(--muted); font-size:.85rem; margin:0}
+
+/* ── verdict ────────────────────────────────────────────── */
+.verdict{
+  margin-top:1rem; padding:1rem; border-radius:10px; border:2px solid var(--line);
+  background:#0b0f14; display:flex; flex-direction:column; gap:.15rem; min-height:5.4rem;
+  justify-content:center;
+}
+.verdict__label{font-size:1.7rem; font-weight:800; letter-spacing:-.02em; line-height:1.1}
+.verdict__why{font-size:.85rem; color:var(--muted)}
+.verdict--accept{border-color:var(--ok); background:var(--ok-dim)}
+.verdict--accept .verdict__label{color:var(--ok)}
+.verdict--reject{border-color:var(--bad); background:var(--bad-dim)}
+.verdict--reject .verdict__label{color:var(--bad)}
+.verdict--nomatch{border-color:var(--warn); background:var(--warn-dim)}
+.verdict--nomatch .verdict__label{color:var(--warn)}
+.verdict--idle .verdict__label{color:var(--muted); font-size:1.2rem}
+
+/* ── buttons ────────────────────────────────────────────── */
+.btn{
+  font:inherit; font-weight:600; cursor:pointer; color:var(--ink);
+  background:#21262d; border:1px solid var(--line);
+  border-radius:8px; padding:.55rem .9rem; transition:.12s;
+}
+.btn:hover:not(:disabled){background:#2d333b}
+.btn:disabled{opacity:.4; cursor:not-allowed}
+.btn--primary{background:var(--accent); border-color:var(--accent); color:#fff}
+.btn--primary:hover:not(:disabled){background:#2f6fd0}
+.btn--big{flex:1; padding:.85rem; font-size:1rem}
+.btn--sm{padding:.35rem .7rem; font-size:.8rem}
+.actions{display:flex; align-items:center; gap:.85rem; margin-top:1rem}
+.check{display:flex; align-items:center; gap:.4rem; font-size:.82rem; color:var(--muted); cursor:pointer}
+
+/* ── manual override ────────────────────────────────────── */
+.manual{margin-top:1rem; border-top:1px solid var(--line); padding-top:.85rem}
+.manual summary{cursor:pointer; font-size:.82rem; color:var(--muted); font-weight:600}
+.hint{font-size:.78rem; color:var(--muted); margin:.6rem 0}
+.manualRow{display:flex; gap:.5rem}
+
+/* ── log ────────────────────────────────────────────────── */
+.logHead{display:flex; align-items:center; justify-content:space-between; margin-bottom:.6rem}
+.logHead .h2{margin:0}
+.log{
+  list-style:none; margin:0; padding:0; max-height:13rem; overflow-y:auto;
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:.78rem;
+}
+.log li{padding:.4rem .55rem; border-bottom:1px solid var(--line);
+        display:flex; gap:.7rem; align-items:baseline}
+.log li:last-child{border-bottom:0}
+.log .t{color:var(--muted); flex-shrink:0; font-variant-numeric:tabular-nums}
+.log .m{word-break:break-all}
+.log .m--err{color:var(--bad)}
+.log .m--ok{color:var(--ok)}
+
+.verdict__item{font-size:.82rem; color:var(--ink); opacity:.85; margin-top:.35rem}
+.verdict__item[hidden]{display:none}
+
+/* ── footer ─────────────────────────────────────────────── */
+.foot{
+  display:flex; flex-direction:column; gap:.7rem;
+  padding:.85rem 1.25rem; background:var(--panel); border-top:1px solid var(--line);
+}
+.footRow{display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-end}
+.foot label{display:flex; flex-direction:column; gap:.25rem;
+            font-size:.72rem; color:var(--muted); font-weight:600}
+.input{
+  background:#0b0f14; color:var(--ink); border:1px solid var(--line);
+  border-radius:6px; padding:.4rem .55rem; font:inherit; font-size:.82rem; min-width:16rem;
+}
+.input--n{min-width:6rem}
+.input--m{min-width:11rem}
+.warn{
+  margin:0; font-size:.72rem; color:var(--warn);
+  align-self:center; max-width:30rem; line-height:1.4;
+}
+.geminiOnly[hidden]{display:none}

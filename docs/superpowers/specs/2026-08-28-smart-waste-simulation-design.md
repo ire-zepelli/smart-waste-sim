@@ -61,15 +61,34 @@ The network diagram (p10) shows bins communicating directly with the Cloud Serve
 
 ### C1 — Classifier page (`classifier/index.html`)
 
-Single page, no build step, served over `http://localhost`.
+Single page, no build step, served over `http://localhost`. **Three swappable classifiers**, selected at runtime:
 
-- Loads an exported Teachable Machine image model from `classifier/model/`
-- Three classes: `BIODEGRADABLE`, `RECYCLABLE`, `NON_RECYCLABLE`
+| Provider | Mode | Notes |
+| --- | --- | --- |
+| **Gemini API** (default) | on-demand | Best accuracy on real, deformed, contaminated waste. No training. Needs internet and a key. |
+| **Teachable Machine** | continuous ~5 fps | Loads from `classifier/model/`. Runs fully offline — the demo-safe fallback. |
+| **MobileNet heuristic** | continuous | Stock ImageNet plus a crude keyword map. Present only so the page does something before the other two are set up. Labelled untrained in the UI. |
+
+Common behaviour:
+
+- Three classes: `BIODEGRADABLE`, `RECYCLABLE`, `NON_RECYCLABLE`, plus `NO_MATCH`
 - Live webcam preview with per-class confidence bars
 - A **target bin** selector — which bin the user is presenting the item to
 - Confidence threshold of **0.70**; below it the result is `NO_MATCH`, never a guess
 - Publishes over MQTT WebSocket to `ws://broker.hivemq.com:8000/mqtt`
 - Connection status indicator; explicit "not connected" state, never a silent failure
+- Manual override buttons that publish a classification with no camera at all
+
+**Why Gemini is the default.** The project document already specifies this path: p9 states the 4G LTE/5G modem "offers high-bandwidth connectivity for areas requiring faster data transfer and image uploads from the ESP32-CAM," and hardware item 15 repeats it. Cloud classification is therefore the branch the design already documented. It also removes the weakest part of a student prototype — a model trained on fifty photographs of one bottle.
+
+**Gemini constraints, all load-bearing:**
+
+- Free tier is roughly **5–15 requests/minute, ~1,000/day**, so classification is fired by the *Present item* button and never by a timer. Auto-present is disabled while Gemini is selected.
+- Requests use `?key=` rather than the `x-goog-api-key` header, because a custom header triggers a CORS preflight that this endpoint rejects.
+- Structured output is enforced with `responseMimeType: application/json` and an explicit `responseSchema`, so the response cannot arrive as prose.
+- Default model `gemini-2.5-flash`, editable in the UI. Model names change; a text field costs nothing and prevents a dead demo.
+
+**Key handling.** The API key is entered at runtime and held in `localStorage` on that machine. It is never written to a file in this repository and never committed. The page states plainly that a key in a web page is readable by anyone using that page. For a classroom demo on a restricted key this is acceptable; for anything public the key belongs behind a proxy.
 
 **Constraint driving the localhost requirement:** Chrome refuses `getUserMedia` on `file://` because it is not a secure context. `http://localhost` qualifies as secure, and keeps plain `ws://` legal — HTTPS would force `wss://` on port 8884 as mixed-content protection. A `serve.bat` wrapping `python -m http.server 8000` handles this; Python 3.13 is already installed on the target machine.
 
@@ -139,7 +158,14 @@ Namespace is project-specific because HiveMQ's public broker is shared globally;
 
 ```
 uc-swm-4d/station01/classify                        (classifier page → ESP32)
-    {"class":"RECYCLABLE","confidence":0.94,"target":"REC","ts":1756377600}
+    {"class":"RECYCLABLE","confidence":0.94,"target":"REC",
+     "source":"gemini","item":"plastic bottle — clean PET, recyclable",
+     "ts":1756377600}
+
+  class      one of BIODEGRADABLE | RECYCLABLE | NON_RECYCLABLE | NO_MATCH
+  target     BIO | REC | NON — the bin the item was presented to
+  source     gemini | teachable | mobilenet | manual — which classifier decided
+  item       optional free text; only Gemini populates it
 
 uc-swm-4d/station01/bin/{bio|rec|non}/telemetry      (ESP32 → broker)
     {"fill":42,"gas":180,"status":"OK"}
@@ -176,11 +202,13 @@ Plus the three reproducible troubleshooting scenarios from §C5.
 
 ## 8. Limitations to state in the project document
 
-1. Classification runs on the laptop, not on the ESP32-CAM. The production path is TFLite Micro / Edge Impulse on-device, as the document's own software stack (p11) already names.
-2. Wokwi simulates the circuit, not physical dynamics — no lid mass, no acoustic reflection off irregular waste surfaces.
-3. The public broker has no authentication and no TLS. Production requires credentials and port 8883.
-4. The model is trained on a small sample under controlled lighting; accuracy will not survive a real waste stream.
-5. Power behaviour is not simulated, so the p13 entry on solenoid-induced resets cannot be demonstrated.
+1. **Classification runs off-device.** The camera and the model both sit on a laptop rather than on an ESP32-CAM. This matches the cloud-upload path in p9, but not the on-device Edge ML path in p11 — the production system would run TFLite Micro or Edge Impulse on the module itself.
+2. **Cloud classification requires connectivity per item.** Every decision is a network round trip of roughly one to three seconds. A real bin on a congested cellular link, or with no signal, cannot behave this way; that is precisely why the documented design also specifies on-device inference. The Teachable Machine provider exists as the offline counter-example.
+3. **The API key is exposed in the browser.** Acceptable for a supervised classroom demonstration on a restricted key; unacceptable in deployment, where it belongs behind a server-side proxy.
+4. **Free-tier rate limits** (5–15 requests/minute) bound how fast items can be presented.
+5. Wokwi simulates the circuit, not physical dynamics — no lid mass, no acoustic reflection off irregular waste surfaces.
+6. The public MQTT broker has no authentication and no TLS. Production requires credentials and port 8883.
+7. Power behaviour is not simulated, so the p13 entry on solenoid-induced resets cannot be demonstrated.
 
 ## 9. Acceptance criteria
 
