@@ -43,9 +43,35 @@ Settings bar along the bottom of the page.
 | **Teachable Machine** | your own | an exported model in `classifier\model\` | Runs offline at ~5 fps. Use this if the venue has no wifi. |
 | **MobileNet heuristic** | — | internet on first load | Placeholder only, labelled untrained in the UI. |
 
-Keys live in your browser's `localStorage`, one per provider. **No key is ever
-written to a file in this repository.** A key in a web page is readable by
-anyone using that page, so use a restricted key and rotate it if it leaks.
+### Where the key comes from
+
+`serve.py` looks for a dotenv-style file and, if it finds one, **proxies every
+vision call through the local server so the key never reaches the browser at
+all.** Nothing to paste, and nothing to leak through devtools or a screen share.
+
+It checks, first hit wins:
+
+1. `--env-file PATH`
+2. `$ZURA_ENV_FILE`
+3. `$GROQ_API_KEY` / `$GEMINI_API_KEY`
+4. `smart-waste-sim/.env`, then
+   `%USERPROFILE%\OneDrive\Documents\personal-shi\access-token.env`
+
+Accepted variable names are `groq` / `GROQ_API_KEY` and
+`gemini` / `GEMINI_API_KEY`. On start-up the console prints which providers it
+found and where from — names only, never values. Confirm with:
+
+```
+curl http://localhost:8000/api/status
+```
+
+If no key is found the page falls back to the **API key** field in the settings
+bar, stored in `localStorage` per provider. That path works from any static
+server but does put the key in the browser, so prefer the proxy.
+
+**No key is ever written to a file in this repository**, and `*.env` is
+gitignored. The proxy refuses non-loopback callers — never expose it publicly,
+it is an unauthenticated hole to your quota.
 
 Do **not** move the Groq model back to `qwen/qwen3.6-27b` — it fails JSON
 validation. Llama 4 Scout and Maverick are not available on the free tier.

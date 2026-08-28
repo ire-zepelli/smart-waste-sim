@@ -137,6 +137,7 @@ const state = {
   latest: [],
   note: null,
   scanError: null,   // surfaced in the modal, not just the hidden log
+  serverKeys: {},    // providers serve.py holds a key for, from /api/status
   busy: false,
   view: 'station',
   stableSince: 0,
@@ -300,6 +301,36 @@ function loadGemini() {
  * returns access-control-allow-origin:* so a browser can call it directly with
  * no proxy, and qwen/qwen3.8-27b handles both image input and JSON mode.
  * qwen3.6-27b does NOT — it fails JSON validation — so do not "upgrade" down. */
+/* When serve.py has a key for this provider the request goes through the local
+ * proxy at /api/classify and the key never enters the browser at all. Falling
+ * back to a direct call keeps the app usable when it is opened from a plain
+ * static server with a key pasted into the settings bar. */
+async function providerFetch(provider, model, payload, directUrl, directHeaders) {
+  if (state.serverKeys[provider]) {
+    return fetch('/api/classify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, model, payload }),
+    });
+  }
+  return fetch(directUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...directHeaders },
+    body: JSON.stringify(payload),
+  });
+}
+
+async function loadServerStatus() {
+  try {
+    const r = await fetch('/api/status', { cache: 'no-store' });
+    if (!r.ok) return;
+    const d = await r.json();
+    state.serverKeys = d.providers || {};
+    const held = Object.keys(state.serverKeys).filter((k) => state.serverKeys[k]);
+    if (held.length) log(`Server holds a key for: ${held.join(', ')} (${d.source})`, 'ok');
+  } catch { /* plain static server, or serve.py not running - direct mode */ }
+}
+
 function loadGroq() {
   return {
     kind: 'groq',
@@ -307,13 +338,12 @@ function loadGroq() {
     detail: `Groq · ${el.cfgGeminiModel.value.trim()}`,
     async predict(video) {
       const key = el.cfgKey.value.trim();
-      if (!key) throw new Error('No API key. Paste one in the settings bar below.');
+      if (!state.serverKeys.groq && !key) {
+        throw new Error('No Groq key. Restart serve.py with your key file, or paste a key below.');
+      }
       const model = el.cfgGeminiModel.value.trim() || 'qwen/qwen3.8-27b';
 
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-        body: JSON.stringify({
+      const res = await providerFetch('groq', model, {
           model,
           temperature: 0,
           max_tokens: 200,
@@ -325,8 +355,9 @@ function loadGroq() {
               { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${captureFrame(video)}` } },
             ],
           }],
-        }),
-      });
+        },
+        'https://api.groq.com/openai/v1/chat/completions',
+        { Authorization: `Bearer ${key}` });
 
       if (!res.ok) {
         const body = await res.text().catch(() => '');
@@ -405,9 +436,10 @@ async function initModel() {
   try {
     if (want === 'groq' || want === 'gemini') {
       state.classifier = want === 'groq' ? loadGroq() : loadGemini();
-      const hasKey = !!el.cfgKey.value.trim();
+      const hasKey = !!el.cfgKey.value.trim() || !!state.serverKeys[want];
       pill(el.modelPill, `model: ${state.classifier.detail}`, hasKey ? 'ok' : 'warn');
       log(hasKey ? `${state.classifier.detail} ready`
+            + (state.serverKeys[want] ? ' (key held server-side)' : '')
                  : `${want === 'groq' ? 'Groq' : 'Gemini'} selected but no API key yet.`,
           hasKey ? 'ok' : 'err');
     } else if (want === 'teachable') {
@@ -461,7 +493,7 @@ function openScanner(binClass) {
   state.scanError = null;
   // Say this before the first click rather than after it silently fails.
   const p = el.cfgProvider.value;
-  if ((p === 'groq' || p === 'gemini') && !el.cfgKey.value.trim()) {
+  if ((p === 'groq' || p === 'gemini') && !el.cfgKey.value.trim() && !state.serverKeys[p]) {
     state.scanError = `No ${p === 'groq' ? 'Groq' : 'Gemini'} API key. `
       + 'Paste one into the settings bar at the bottom of the page.';
   }
@@ -1202,6 +1234,7 @@ setInterval(renderAll, 500);
     log('Opened via file:// — the camera will be blocked. Run serve.bat and use http://localhost:8000', 'err');
   }
   await listCameras();
+  await loadServerStatus();
   connect();
   await initModel();
 })();

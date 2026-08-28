@@ -103,7 +103,11 @@ Three traps worth recording, each of which cost a round trip to find:
 
 **Rate limits shape the interaction.** Every classification is a metered API call, so it is fired by the *Scan Item* button and never by a timer. Auto-present is disabled whenever a cloud provider is selected. Gemini's free tier is roughly 5–15 requests/minute and ~1,000/day.
 
-**Key handling.** Keys are entered at runtime and held in `localStorage`, stored **per provider** so switching between Groq and Gemini cannot send one provider's key to the other. No key is ever written to a file in this repository. The page states plainly that a key in a web page is readable by anyone using that page. For a supervised classroom demonstration on a restricted key this is acceptable; for anything public the key belongs behind a server-side proxy.
+**Key handling — proxied by default.** `serve.py` reads a dotenv-style file and proxies `/api/classify` to the provider with the key attached server-side. **The browser never receives the key**, so it cannot leak through devtools, a screenshot, or a screen share during the demonstration. The page discovers this via `GET /api/status`, which reports only *which* providers have a key and the file it came from, never a value. The proxy refuses non-loopback callers, because an open proxy is an unauthenticated hole to the quota.
+
+The direct-from-browser path remains as a fallback for when the page is served by something other than `serve.py`: a key typed into the settings bar, held in `localStorage` **per provider** so switching between Groq and Gemini cannot send one provider's key to the other. That path does expose the key to anyone using the page, and the UI says so.
+
+No key is ever written to a file in this repository, and `*.env` is gitignored.
 
 **Constraint driving the localhost requirement:** Chrome refuses `getUserMedia` on `file://` because it is not a secure context. `http://localhost` qualifies as secure, and keeps plain `ws://` legal — HTTPS would force `wss://` on port 8884 as mixed-content protection. A `serve.bat` wrapping `python -m http.server 8000` handles this; Python 3.13 is already installed on the target machine.
 
@@ -219,7 +223,7 @@ Plus the three reproducible troubleshooting scenarios from §C5.
 
 1. **Classification runs off-device.** The camera and the model both sit on a laptop rather than on an ESP32-CAM. This matches the cloud-upload path in p9, but not the on-device Edge ML path in p11 — the production system would run TFLite Micro or Edge Impulse on the module itself.
 2. **Cloud classification requires connectivity per item.** Every decision is a network round trip of roughly one to three seconds. A real bin on a congested cellular link, or with no signal, cannot behave this way; that is precisely why the documented design also specifies on-device inference. The Teachable Machine provider exists as the offline counter-example.
-3. **The API key is exposed in the browser.** Acceptable for a supervised classroom demonstration on a restricted key; unacceptable in deployment, where it belongs behind a server-side proxy.
+3. **The API key is held by the local server, not the browser**, so it is not exposed to the page. This is a real proxy, but it runs on the presenter's laptop and is loopback-only; a deployment would need an authenticated service rather than an open local endpoint.
 4. **Free-tier rate limits** (5–15 requests/minute) bound how fast items can be presented.
 5. Wokwi simulates the circuit, not physical dynamics — no lid mass, no acoustic reflection off irregular waste surfaces.
 6. The public MQTT broker has no authentication and no TLS. Production requires credentials and port 8883.
