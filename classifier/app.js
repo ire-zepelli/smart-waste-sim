@@ -136,6 +136,7 @@ const state = {
   targetBin: null,
   latest: [],
   note: null,
+  scanError: null,   // surfaced in the modal, not just the hidden log
   busy: false,
   view: 'station',
   stableSince: 0,
@@ -457,6 +458,13 @@ function openScanner(binClass) {
   state.targetBin = binClass;
   state.latest = [];
   state.note = null;
+  state.scanError = null;
+  // Say this before the first click rather than after it silently fails.
+  const p = el.cfgProvider.value;
+  if ((p === 'groq' || p === 'gemini') && !el.cfgKey.value.trim()) {
+    state.scanError = `No ${p === 'groq' ? 'Groq' : 'Gemini'} API key. `
+      + 'Paste one into the settings bar at the bottom of the page.';
+  }
   const m = META[binClass];
   if (el.scanModalIcon) el.scanModalIcon.innerHTML = m.iconSvg || m.icon;
   if (el.scanModalCard) el.scanModalCard.dataset.tone = m.key;
@@ -470,6 +478,7 @@ function openScanner(binClass) {
 }
 
 function closeScanner() {
+  state.scanError = null;
   if (el.scanModalOverlay) el.scanModalOverlay.hidden = true;
   state.targetBin = null;
   stopCamera();
@@ -552,10 +561,11 @@ function startInference() {
 
 async function classifyOnce(note) {
   if (state.busy) return;
-  if (!state.classifier) { log('No classifier loaded', 'err'); return; }
+  if (!state.classifier) { scanFail('No classifier loaded — pick one in the settings bar.'); return; }
   const hasCamera = !!(state.stream || (el.cam && (el.cam.srcObject || el.cam.readyState >= 1)));
-  if (!hasCamera) { log('Camera is not running', 'err'); return; }
+  if (!hasCamera) { scanFail('Camera is not running. Press Enable Camera.'); return; }
 
+  state.scanError = null;
   state.busy = true;
   if (el.present) {
     el.present.disabled = true;
@@ -569,7 +579,7 @@ async function classifyOnce(note) {
     renderVerdict();
     publishClassification(note);
   } catch (e) {
-    log(`Classification failed: ${e.message}`, 'err');
+    scanFail(e.message);
   } finally {
     state.busy = false;
     const isLive = !!(state.stream || (el.cam && (el.cam.srcObject || el.cam.readyState >= 1)));
@@ -579,6 +589,15 @@ async function classifyOnce(note) {
     }
     renderVerdict();
   }
+}
+
+/* Failures used to go only to log(), which renders inside the Circuit tab and
+ * is invisible while the scan modal is open. Every silent "nothing happened"
+ * click was an error nobody could read. Route them through here instead. */
+function scanFail(msg) {
+  state.scanError = msg;
+  log(msg, 'err');
+  renderVerdict();
 }
 
 function threshold() {
@@ -673,14 +692,16 @@ function renderVerdict() {
     }
   }
   if (el.scanStatusBadge) {
-    el.scanStatusBadge.textContent = d.verdict;
-    el.scanStatusBadge.dataset.kind = d.kind || 'idle';
+    el.scanStatusBadge.textContent = state.scanError ? 'ERROR' : d.verdict;
+    el.scanStatusBadge.dataset.kind = state.scanError ? 'reject' : (d.kind || 'idle');
   }
   // The verdict block is display:none in this layout, so without this the
   // operator sees a bare ACCEPT/REJECT badge and never learns why. The model's
   // one-line reason is the most demonstrable part of the whole system.
   if (el.scanModalHint) {
-    el.scanModalHint.textContent = state.note || d.why || 'Point camera at item to identify';
+    el.scanModalHint.textContent =
+      state.scanError || state.note || d.why || 'Point camera at item to identify';
+    el.scanModalHint.classList.toggle('scanModalHint--err', !!state.scanError);
   }
 }
 
