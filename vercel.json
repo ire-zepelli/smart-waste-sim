@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": null,
+  "outputDirectory": "classifier",
+  "framework": null,
+  "rewrites": [
+    { "source": "/api/classify", "destination": "/api/classify" },
+    { "source": "/api/status", "destination": "/api/status" }
+  ]
+}

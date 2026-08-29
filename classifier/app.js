@@ -138,6 +138,7 @@ const state = {
   serverKeys: {},    // providers serve.py holds a key for, from /api/status
   samples: {},       // corrections filed per label, from /api/samples
   sampleTotal: 0,
+  canSaveSamples: true,
   busy: false,
   view: 'station',
   stableSince: 0,
@@ -326,12 +327,25 @@ async function providerFetch(provider, model, payload, directUrl, directHeaders)
   });
 }
 
+/* An HTTPS page cannot open a plain ws:// socket - Chrome blocks it as mixed
+ * content, and the failure is quiet: the page looks completely normal and MQTT
+ * simply never connects. So on a hosted build the broker default switches to
+ * the TLS listener before the first connection attempt. */
+function fixBrokerForHttps() {
+  if (location.protocol !== 'https:') return;
+  const url = el.cfgBroker.value.trim();
+  if (!url.startsWith('ws://')) return;
+  el.cfgBroker.value = 'wss://broker.hivemq.com:8884/mqtt';
+  log('Served over HTTPS — switched the broker to wss:// (ws:// is blocked as mixed content)', 'ok');
+}
+
 async function loadServerStatus() {
   try {
     const r = await fetch('/api/status', { cache: 'no-store' });
     if (!r.ok) return;
     const d = await r.json();
     state.serverKeys = d.providers || {};
+    state.canSaveSamples = d.samples !== false;
     const held = Object.keys(state.serverKeys).filter((k) => state.serverKeys[k]);
     if (held.length) log(`Server holds a key for: ${held.join(', ')} (${d.source})`, 'ok');
   } catch { /* plain static server, or serve.py not running - direct mode */ }
@@ -1044,6 +1058,12 @@ function publishClassification(note) {
  * The camera frame is discarded after classification, so it has to be grabbed
  * again here or the label would have no image attached to it. */
 async function captureCorrection(label) {
+  // Vercel's filesystem is read-only apart from an ephemeral /tmp, so a hosted
+  // build would accept samples and silently discard them. Better to not offer.
+  if (state.canSaveSamples === false) {
+    log('Correction not saved — the hosted build has no writable storage', 'err');
+    return;
+  }
   const live = !!(state.stream && el.cam && el.cam.readyState >= 2);
   if (!live) { log('No frame to capture — camera is not running', 'err'); return; }
   const top = state.latest[0];
@@ -1079,6 +1099,7 @@ async function captureCorrection(label) {
 }
 
 async function loadSampleCounts() {
+  if (state.canSaveSamples === false) return;
   try {
     const r = await fetch('/api/samples', { cache: 'no-store' });
     if (!r.ok) return;
@@ -1257,6 +1278,7 @@ setInterval(renderAll, 500);
     log('Opened via file:// — the camera will be blocked. Run serve.bat and use http://localhost:8000', 'err');
   }
   await listCameras();
+  fixBrokerForHttps();
   await loadServerStatus();
   await loadSampleCounts();
   connect();
