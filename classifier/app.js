@@ -771,13 +771,14 @@ function renderBinCards() {
   for (const binClass of BINS) {
     const { m, s, seen, stale, live, full } = binView(binClass);
 
-    const card = document.createElement('button');
+    const card = document.createElement('div');
+    card.setAttribute('role', 'button');
+    card.tabIndex = 0;
     card.className = 'binCard'
       + (stale || !seen ? ' binCard--stale' : '')
       + (full ? ' binCard--full' : '');
     card.dataset.bin = binClass;
     card.dataset.tone = m.key;
-    card.type = 'button';
 
     card.innerHTML = `
       <div class="binCard__icon">${m.iconSvg || m.icon}</div>
@@ -959,6 +960,8 @@ function publishManual(label) {
 /* ── wiring ───────────────────────────────────────────────────────────── */
 
 el.binCards.addEventListener('click', (e) => {
+  // the circuit shortcut sits inside the card, so it must claim the click first
+  if (e.target.closest('[data-goto="circuit"]')) { showView('circuit'); return; }
   const card = e.target.closest('.binCard');
   if (!card?.dataset.bin) return;
   // A full bin refuses everything, so opening its camera would only mislead.
@@ -988,6 +991,15 @@ if (el.cfgWokwiId) {
   el.cfgWokwiId.addEventListener('change', applyWokwiProject);
   applyWokwiProject();
 }
+
+// the card is a div now, so Enter and Space have to be wired by hand
+el.binCards.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const hit = e.target.closest('[data-goto="circuit"], .binCard');
+  if (!hit) return;
+  e.preventDefault();
+  hit.click();
+});
 
 el.helpBtn.addEventListener('click', () => { el.helpPanel.hidden = !el.helpPanel.hidden; });
 el.helpClose.addEventListener('click', () => { el.helpPanel.hidden = true; });

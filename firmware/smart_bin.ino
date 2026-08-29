@@ -52,6 +52,12 @@ const unsigned long MEASURE_INTERVAL_MS   = 500;
 const unsigned long CLASSIFY_TTL_MS       = 5000;
 const float CONFIDENCE_MIN     = 0.70f;
 
+// How much of the bin one admitted item is modelled to occupy. At 8% a bin
+// reaches the 85% FULL threshold after roughly eleven items, which is enough
+// for a demonstration without emptying it constantly.
+const int  DEPOSIT_PCT_PER_ITEM = 8;
+const unsigned long EMPTY_HOLD_MS = 1200;   // long-press BIN to empty a bin
+
 const int LID_LOCKED_DEG = 0;
 const int LID_OPEN_DEG   = 90;
 const unsigned long LID_OPEN_MS = 2000;  // how long the lid stays open
@@ -93,6 +99,7 @@ struct Bin {
   int  samples[5];
   uint8_t sampleIdx;
   bool primed;
+  int  depositPct;   // modelled volume of admitted items, added to the sensor
 };
 
 //                              trig echo servo ledR ledG
@@ -114,6 +121,8 @@ unsigned long reconnectWait = 1000;   // backoff, capped at 30s
 uint8_t activeBin  = 1;  // button fallback: which bin is being approached
 uint8_t nextItem   = 0;  // button fallback: class of the next simulated item
 bool    lastBtnBin = HIGH, lastBtnItem = HIGH;
+unsigned long btnBinDownAt = 0;
+bool    binHoldHandled = false;
 
 /* ── helpers ────────────────────────────────────────────────────────────── */
 
@@ -150,6 +159,18 @@ int readDistanceCm(Bin& b) {
   return cm;
 }
 
+/* Fill level has two sources that add together.
+ *
+ * The ultrasonic sensor gives the physical level, which in Wokwi is whatever
+ * the HC-SR04 distance slider is set to. Firmware cannot move that slider - no
+ * code can drive a simulated sensor - so on its own the bin would never get any
+ * fuller no matter how many items it accepted.
+ *
+ * So each admitted item also adds DEPOSIT_PCT_PER_ITEM to a modelled deposit,
+ * standing in for the volume the item occupies. Dragging the slider still
+ * works and still registers; the deposit rides on top of it. Long-press the
+ * BIN button to empty a bin and clear its deposit.
+ */
 void measure(Bin& b) {
   int cm = readDistanceCm(b);
   if (cm < 0) return;                          // discard, keep last good value
@@ -160,9 +181,20 @@ void measure(Bin& b) {
     b.primed = true;
   }
   int d = medianOf(b.samples);
-  int pct = (int)round((float)(BIN_DEPTH_CM - d) * 100.0f / (float)BIN_DEPTH_CM);
-  b.fillPct = constrain(pct, 0, 100);
+  int sensorPct = (int)round((float)(BIN_DEPTH_CM - d) * 100.0f / (float)BIN_DEPTH_CM);
+  sensorPct = constrain(sensorPct, 0, 100);
+  b.fillPct = constrain(sensorPct + b.depositPct, 0, 100);
   b.isFull  = b.fillPct >= FULL_THRESHOLD_PCT;
+}
+
+void emptyBin(Bin& b) {
+  b.depositPct = 0;
+  measure(b);
+  b.wasFull = b.isFull;
+  Serial.printf("[%s] emptied - deposit cleared, now %d%%\n", b.key, b.fillPct);
+  publishEvent(b, "EMPTIED", nullptr);
+  publishTelemetry(b);
+  showIdle(b);
 }
 
 void showIdle(Bin& b) {
@@ -213,7 +245,11 @@ void admit(Bin& b) {
   b.lock.write(LID_OPEN_DEG);
   delay(LID_OPEN_MS);
   b.lock.write(LID_LOCKED_DEG);
+  // the item is now inside, so the bin is that much fuller
+  b.depositPct = constrain(b.depositPct + DEPOSIT_PCT_PER_ITEM, 0, 100);
   measure(b);
+  Serial.printf("[%s] now %d%% full
+", b.key, b.fillPct);
   publishEvent(b, "ACCEPT", nullptr);
   publishTelemetry(b);
   showIdle(b);
