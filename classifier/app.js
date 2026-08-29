@@ -561,26 +561,62 @@ async function listCameras() {
 
 async function startCamera() {
   if (!navigator.mediaDevices?.getUserMedia) {
-    log('getUserMedia unavailable. Serve over http://localhost, not file://', 'err');
+    scanFail('Camera unavailable. Serve over http://localhost, not file://');
     return;
   }
+
+  /* The first open has no device selected, so it asks with a soft facingMode
+   * preference and the browser picks a working camera. listCameras() then fills
+   * the picker, and every later open inherited that id as an EXACT constraint -
+   * which throws OverconstrainedError whenever the id has gone stale or the
+   * first enumerated device is not the one that actually works (a virtual cam,
+   * an IR sensor). That is why bin one worked and bin two did not.
+   *
+   * A specific device is now a preference, with a fallback to any camera. */
+  const wanted = el.camSelect ? el.camSelect.value : '';
+  const attempts = wanted
+    ? [{ deviceId: { exact: wanted } }, { facingMode: 'environment' }, true]
+    : [{ facingMode: 'environment' }, true];
+
+  let lastErr = null;
+  for (const video of attempts) {
+    try {
+      state.stream = await navigator.mediaDevices.getUserMedia({ video });
+      lastErr = null;
+      break;
+    } catch (e) {
+      lastErr = e;
+      // A refusal or a missing camera will not improve on the next attempt.
+      if (e.name === 'NotAllowedError' || e.name === 'NotFoundError') break;
+    }
+  }
+
+  if (lastErr || !state.stream) {
+    const why = lastErr?.name === 'NotAllowedError'
+      ? 'Camera permission denied. Allow it in the address bar, then press Enable Camera.'
+      : lastErr?.name === 'NotFoundError'
+        ? 'No camera found on this device.'
+        : lastErr?.name === 'NotReadableError'
+          ? 'The camera is in use by another app. Close it and press Enable Camera.'
+          : `Camera failed: ${lastErr?.message || 'unknown error'}`;
+    scanFail(why);
+    return;
+  }
+
   try {
-    const deviceId = el.camSelect ? el.camSelect.value : '';
-    state.stream = await navigator.mediaDevices.getUserMedia({
-      video: deviceId ? { deviceId: { exact: deviceId } } : { facingMode: 'environment' },
-    });
     el.cam.srcObject = state.stream;
     await el.cam.play();
-    if (el.camOverlay) el.camOverlay.hidden = true;
-    if (el.stopCam) el.stopCam.disabled = false;
-    if (el.present) el.present.disabled = false;
-    await listCameras();
-    startInference();
-    renderVerdict();
   } catch (e) {
-    log(`Camera failed: ${e.message}`, 'err');
-    renderVerdict();
+    scanFail(`Camera stream would not play: ${e.message}`);
+    return;
   }
+
+  if (el.camOverlay) el.camOverlay.hidden = true;
+  if (el.stopCam) el.stopCam.disabled = false;
+  if (el.present) el.present.disabled = false;
+  await listCameras();
+  startInference();
+  renderVerdict();
 }
 
 function stopCamera() {
