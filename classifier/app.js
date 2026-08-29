@@ -110,7 +110,7 @@ const STALE_MS = 15000;   // no telemetry for this long => grey the bin out
 const LID_OPEN_MS = 2000; // mirrors the firmware's lid dwell
 const MAX_SCAN_ATTEMPTS = 3;  // retries before a rejection is reported
 const RETRY_GAP_MS = 350;     // spacing between retries, to be kind to rate limits
-const PLACED_HOLD_MS = 2500;  // how long "item placed" stays up after the lid shuts
+// PLACED now persists until the next scan, so there is no hold to configure.
 
 const $ = (s) => document.querySelector(s);
 const el = {
@@ -140,7 +140,7 @@ const state = {
   latest: [],
   note: null,
   scanError: null,   // surfaced in the modal, not just the hidden log
-  lidEvent: null,    // {key, opensUntil, placedUntil} - narrates a real lid cycle
+  lidEvent: null,    // {key, opensUntil} - narrates the lid cycle; PLACED persists
   serverKeys: {},    // providers serve.py holds a key for, from /api/status
   samples: {},       // corrections filed per label, from /api/samples
   sampleTotal: 0,
@@ -845,23 +845,21 @@ function renderBars() {
  * re-syncs the timing to the lid that actually moved. */
 function startLidPhase(binKey) {
   const now = Date.now();
-  state.lidEvent = { key: binKey, opensUntil: now + LID_OPEN_MS,
-                     placedUntil: now + LID_OPEN_MS + PLACED_HOLD_MS };
+  state.lidEvent = { key: binKey, opensUntil: now + LID_OPEN_MS };
   renderVerdict();
 }
 
 function lidPhase() {
   const e = state.lidEvent;
   if (!e) return null;
-  const now = Date.now();
-  if (now < e.opensUntil) {
+  if (Date.now() < e.opensUntil) {
     return { label: 'OPENING', kind: 'accept', text: 'Bin is opening — place the item inside.' };
   }
-  if (now < e.placedUntil) {
-    return { label: 'PLACED', kind: 'accept', text: 'Item placed in the bin.' };
-  }
-  state.lidEvent = null;
-  return null;
+  // PLACED is the settled outcome and stays put. It used to expire after a few
+  // seconds and fall back to a bare ACCEPT, which looks exactly like nothing
+  // having happened - you had to be watching the screen to catch it at all.
+  // It is cleared by the next scan or by closing the bin.
+  return { label: 'PLACED', kind: 'accept', text: 'Item placed in the bin.' };
 }
 
 function renderVerdict() {
