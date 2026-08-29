@@ -110,7 +110,8 @@ const STALE_MS = 15000;   // no telemetry for this long => grey the bin out
 const LID_OPEN_MS = 2000; // mirrors the firmware's lid dwell
 const MAX_SCAN_ATTEMPTS = 3;  // retries before a rejection is reported
 const RETRY_GAP_MS = 350;     // spacing between retries, to be kind to rate limits
-// PLACED now persists until the next scan, so there is no hold to configure.
+const PLACED_MS = 2000;        // how long "item placed" shows before the modal closes
+const REJECT_CLOSE_MS = 4500;  // long enough to read the reason and still reach Override
 
 const $ = (s) => document.querySelector(s);
 const el = {
@@ -141,6 +142,7 @@ const state = {
   note: null,
   scanError: null,   // surfaced in the modal, not just the hidden log
   lidEvent: null,    // {key, opensUntil} - narrates the lid cycle; PLACED persists
+  closeTimer: null,  // auto-close once the outcome has been shown
   serverKeys: {},    // providers serve.py holds a key for, from /api/status
   samples: {},       // corrections filed per label, from /api/samples
   sampleTotal: 0,
@@ -544,6 +546,8 @@ function openScanner(binClass) {
 }
 
 function closeScanner() {
+  clearTimeout(state.closeTimer);
+  state.closeTimer = null;
   state.scanError = null;
   state.lidEvent = null;
   if (el.scanModalOverlay) el.scanModalOverlay.hidden = true;
@@ -670,6 +674,8 @@ async function classifyOnce(note) {
 
   state.scanError = null;
   state.lidEvent = null;
+  clearTimeout(state.closeTimer);
+  state.closeTimer = null;
   state.busy = true;
   if (el.present) {
     el.present.disabled = true;
@@ -712,20 +718,38 @@ async function classifyOnce(note) {
     renderBars();
     renderVerdict();
     publishClassification(note);
-    if (decide().verdict === 'ACCEPT' && state.targetBin) {
-      startLidPhase(META[state.targetBin].key);
-    }
   } catch (e) {
     scanFail(e.message);
   } finally {
+    // decide() reports SCANNING while busy is set, so the outcome can only be
+    // read once it is cleared. Doing this inside the try meant the ACCEPT
+    // branch never fired and the lid narration silently never started.
     state.busy = false;
     const isLive = !!(state.stream || (el.cam && (el.cam.srcObject || el.cam.readyState >= 1)));
     if (el.present) {
       el.present.textContent = 'Scan Item';
       el.present.disabled = !isLive;
     }
+
+    if (!state.scanError) {
+      const d = decide();
+      if (d.verdict === 'ACCEPT' && state.targetBin) {
+        startLidPhase(META[state.targetBin].key);
+        scheduleClose(LID_OPEN_MS + PLACED_MS);
+      } else if (d.kind === 'reject' || d.kind === 'nomatch') {
+        scheduleClose(REJECT_CLOSE_MS);
+      }
+    }
     renderVerdict();
   }
+}
+
+/* Close the bin on its own once the outcome has been shown. A refusal gets
+ * longer, because the manual override lives inside this modal and closing it
+ * out from under someone who was reaching for it would be worse than waiting. */
+function scheduleClose(ms) {
+  clearTimeout(state.closeTimer);
+  state.closeTimer = setTimeout(() => { state.closeTimer = null; closeScanner(); }, ms);
 }
 
 /* Failures used to go only to log(), which renders inside the Circuit tab and
@@ -775,16 +799,18 @@ function advice(d) {
   if (!d || !d.reason) return null;
   const top = state.latest[0];
   if (d.reason === 'no_item') {
-    return 'Hold one item in the middle of the frame, then scan again.';
+    return 'The lid will not open — no item recognised. '
+         + 'Hold one item in the middle of the frame and scan again.';
   }
   if (d.reason === 'low_confidence') {
-    return 'Not sure enough to unlock. Move the item closer, hold it still, '
-         + 'and give it more light — then scan again.';
+    return 'The lid will not open — item not recognised clearly. '
+         + 'Move it closer, hold it still, and give it more light.';
   }
   if (d.reason === 'class_mismatch' && top && META[top.label]) {
-    return `That looks like ${META[top.label].name.toLowerCase()}. `
+    return `The lid will not open — that looks like ${META[top.label].name.toLowerCase()}. `
          + `Try the ${META[top.label].short} bin, or override below if this is wrong.`;
   }
+  if (d.reason === 'bin_full') return 'The lid will not open — this bin is full.';
   return null;
 }
 
