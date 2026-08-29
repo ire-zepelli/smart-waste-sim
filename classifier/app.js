@@ -784,7 +784,8 @@ function renderBinCards() {
       <div class="binCard__icon">${m.iconSvg || m.icon}</div>
       <h3 class="binCard__name">${m.name}</h3>
       <p class="binCard__count">${s.collected} items collected</p>
-      ${capBlock(s, live, full)}`;
+      ${capBlock(s, live, full)}
+      <button class="binCard__circuit" data-goto="circuit" type="button">View circuit</button>`;
     el.binCards.append(card);
   }
   updateHeader();
