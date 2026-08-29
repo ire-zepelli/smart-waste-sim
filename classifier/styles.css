@@ -535,3 +535,12 @@ body{
 .binCard__circuit:focus-visible{outline:2px solid var(--tone); outline-offset:2px}
 /* the inner button must not re-trigger the card's own hover transition */
 .binCard__circuit{position:relative; z-index:1}
+
+/* The guidance under the scan button is the only place the operator is told
+   what to physically do about a refusal, so it has to be readable rather than
+   the same dim grey as the idle placeholder. */
+.scanModalHint{transition:color .2s}
+.scanModalHint[data-kind="nomatch"]{color:var(--warn); font-size:.78rem; line-height:1.5}
+.scanModalHint[data-kind="reject"]{color:var(--bad); font-size:.78rem; line-height:1.5}
+.scanModalHint[data-kind="accept"]{color:var(--ok)}
+.scanModalHint[data-kind="error"]{color:var(--bad); font-weight:600}

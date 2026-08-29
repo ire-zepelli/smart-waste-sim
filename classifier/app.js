@@ -793,7 +793,7 @@ function renderVerdict() {
     el.scanModalHint.textContent = state.scanError
       || (tip ? `${state.note ? state.note + ' — ' : ''}${tip}`
               : (state.note || d.why || 'Point camera at item to identify'));
-    el.scanModalHint.classList.toggle('scanModalHint--err', !!state.scanError);
+    el.scanModalHint.dataset.kind = state.scanError ? 'error' : (d.kind || 'idle');
   }
 }
 
