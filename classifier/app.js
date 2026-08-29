@@ -106,6 +106,7 @@ const STALE_MS = 15000;   // no telemetry for this long => grey the bin out
 const LID_OPEN_MS = 2000; // mirrors the firmware's lid dwell
 const MAX_SCAN_ATTEMPTS = 3;  // retries before a rejection is reported
 const RETRY_GAP_MS = 350;     // spacing between retries, to be kind to rate limits
+const PLACED_HOLD_MS = 2500;  // how long "item placed" stays up after the lid shuts
 
 const $ = (s) => document.querySelector(s);
 const el = {
@@ -135,6 +136,7 @@ const state = {
   latest: [],
   note: null,
   scanError: null,   // surfaced in the modal, not just the hidden log
+  lidEvent: null,    // {key, opensUntil, placedUntil} - narrates a real lid cycle
   serverKeys: {},    // providers serve.py holds a key for, from /api/status
   samples: {},       // corrections filed per label, from /api/samples
   sampleTotal: 0,
@@ -531,6 +533,7 @@ function openScanner(binClass) {
 
 function closeScanner() {
   state.scanError = null;
+  state.lidEvent = null;
   if (el.scanModalOverlay) el.scanModalOverlay.hidden = true;
   state.targetBin = null;
   stopCamera();
@@ -618,6 +621,7 @@ async function classifyOnce(note) {
   if (!hasCamera) { scanFail('Camera is not running. Press Enable Camera.'); return; }
 
   state.scanError = null;
+  state.lidEvent = null;
   state.busy = true;
   if (el.present) {
     el.present.disabled = true;
@@ -780,8 +784,26 @@ function renderBars() {
   });
 }
 
+/* While the controller is actually opening a lid, the modal narrates that
+ * instead of repeating the classification verdict. Expires on its own, so a
+ * stale phase cannot linger if no further events arrive. */
+function lidPhase() {
+  const e = state.lidEvent;
+  if (!e) return null;
+  const now = Date.now();
+  if (now < e.opensUntil) {
+    return { label: 'OPENING', kind: 'accept', text: 'Bin is opening — place the item inside.' };
+  }
+  if (now < e.placedUntil) {
+    return { label: 'PLACED', kind: 'accept', text: 'Item placed in the bin.' };
+  }
+  state.lidEvent = null;
+  return null;
+}
+
 function renderVerdict() {
   const d = decide();
+  const phase = lidPhase();
   if (el.verdict) {
     el.verdict.className = `verdict verdict--${d.kind || 'idle'}`;
     const lbl = el.verdict.querySelector('.verdict__label');
@@ -794,14 +816,21 @@ function renderVerdict() {
     }
   }
   if (el.scanStatusBadge) {
-    el.scanStatusBadge.textContent = state.scanError ? 'ERROR' : d.verdict;
-    el.scanStatusBadge.dataset.kind = state.scanError ? 'reject' : (d.kind || 'idle');
+    el.scanStatusBadge.textContent =
+      state.scanError ? 'ERROR' : (phase ? phase.label : d.verdict);
+    el.scanStatusBadge.dataset.kind =
+      state.scanError ? 'reject' : (phase ? phase.kind : (d.kind || 'idle'));
   }
   // The verdict block is display:none in this layout, so without this the
   // operator sees a bare ACCEPT/REJECT badge and never learns why. The model's
   // one-line reason is the most demonstrable part of the whole system.
   if (el.scanModalHint) {
     const tip = advice(d);
+    if (phase) {
+      el.scanModalHint.textContent = phase.text;
+      el.scanModalHint.dataset.kind = phase.kind;
+      return;
+    }
     el.scanModalHint.textContent = state.scanError
       || (tip ? `${state.note ? state.note + ' — ' : ''}${tip}`
               : (state.note || d.why || 'Point camera at item to identify'));
@@ -939,6 +968,7 @@ function renderCircuitCards() {
 }
 
 function renderAll() {
+  if (el.scanModalOverlay && !el.scanModalOverlay.hidden) renderVerdict();
   if (state.view === 'station') renderBinCards();
   else updateHeader();
   if (state.view === 'circuit') renderCircuitCards();
@@ -981,9 +1011,17 @@ function onBrokerMessage(topic, buf) {
     s.eventAt = Date.now();
     if (doc.fill != null) s.fill = doc.fill;
     if (doc.event === 'ACCEPT') {
-      s.lidOpenUntil = Date.now() + LID_OPEN_MS;
+      const now = Date.now();
+      s.lidOpenUntil = now + LID_OPEN_MS;
       s.collected++;
       if (doc.reason === 'manual_override') s.overridden++;
+      // Narrate the lid cycle the controller is actually performing, but only
+      // for the bin currently on screen. Driven by the event rather than by our
+      // own verdict, so the page never claims a lid opened when none did.
+      if (state.targetBin && META[state.targetBin].key === key) {
+        state.lidEvent = { key, opensUntil: now + LID_OPEN_MS,
+                           placedUntil: now + LID_OPEN_MS + PLACED_HOLD_MS };
+      }
     }
     if (doc.event === 'FULL') s.status = 'FULL';
     log(`${BY_KEY[key]} ${doc.event}${doc.reason ? ' (' + doc.reason + ')' : ''}`,
