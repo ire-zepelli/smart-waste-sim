@@ -246,7 +246,15 @@ Identify the single most prominent waste item a person is holding up to the bin 
 
 Return NO_MATCH rather than guessing. Contamination downgrades an item: a grease-soaked pizza box is BIODEGRADABLE, not RECYCLABLE.
 
-confidence is your own certainty from 0 to 1. item is a two-or-three word name for what you see. reason is one short sentence a student could read aloud during a demonstration.`;
+confidence must express ONE thing only: how sure you are of the CATEGORY. Anchor it:
+
+- 0.90 to 1.00 - you can name the item and its material, and the category follows clearly.
+- 0.70 to 0.89 - you are fairly sure of the category but the item is partly obscured or ambiguous.
+- below 0.70 - you genuinely cannot tell. Use NO_MATCH instead.
+
+Do NOT lower confidence because the photo is dark, blurred, crinkled or badly framed. Poor image quality only matters if it actually stops you identifying the item. If you can say what the object is and what it is made of, you are confident, however bad the picture looks.
+
+item is a two-or-three word name for what you see. reason is one short sentence a student could read aloud during a demonstration.`;
 
 /** Turn a cloud provider's {class, confidence, item, reason} into the internal
  *  prediction array, and stash the human-readable note for the UI. Shared so
