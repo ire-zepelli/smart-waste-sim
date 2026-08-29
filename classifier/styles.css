@@ -524,3 +524,14 @@ body{
 }
 .binCard__circuit:hover{color:var(--tone); border-color:var(--tone)}
 .binCard--full .binCard__circuit:hover{color:var(--bad); border-color:var(--bad)}
+
+/* hover/focus polish: promote the layer so the lift stays smooth, and give the
+   card a visible ring now that it is keyboard-focusable */
+.binCard{will-change:transform}
+.binCard:focus-visible{
+  outline:none; border-color:var(--tone);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--tone) 35%,transparent), 0 0 50px var(--glow-c);
+}
+.binCard__circuit:focus-visible{outline:2px solid var(--tone); outline-offset:2px}
+/* the inner button must not re-trigger the card's own hover transition */
+.binCard__circuit{position:relative; z-index:1}

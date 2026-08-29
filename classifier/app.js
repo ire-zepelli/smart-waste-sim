@@ -754,40 +754,66 @@ function binView(binClass) {
   return { m, s, seen, stale, live, full, lidOpen };
 }
 
-function capBlock(s, live, full) {
-  const pct = live && s.fill != null ? s.fill : 0;
-  return `
-    <div class="cap">
-      <div class="cap__head">
-        <span class="cap__k">CAPACITY</span>
-        <span class="cap__v">${pct}%</span>
-      </div>
-      <div class="cap__track"><div class="cap__fill" style="width:${pct}%"></div></div>
-    </div>`;
-}
-
-function renderBinCards() {
+/* The cards are built once and then patched in place.
+ *
+ * They used to be rebuilt wholesale on every repaint, and renderAll runs on a
+ * 500ms timer, so the card under the cursor was destroyed and recreated twice
+ * a second. That restarted the hover transition from zero each time, which read
+ * as a stutter. Replacing a node also drops focus and cancels :active, so the
+ * keyboard ring and the button press flickered too.
+ */
+function buildBinCards() {
   el.binCards.innerHTML = '';
   for (const binClass of BINS) {
-    const { m, s, seen, stale, live, full } = binView(binClass);
-
+    const m = META[binClass];
     const card = document.createElement('div');
     card.setAttribute('role', 'button');
     card.tabIndex = 0;
-    card.className = 'binCard'
-      + (stale || !seen ? ' binCard--stale' : '')
-      + (full ? ' binCard--full' : '');
+    card.className = 'binCard';
     card.dataset.bin = binClass;
     card.dataset.tone = m.key;
-
     card.innerHTML = `
       <div class="binCard__icon">${m.iconSvg || m.icon}</div>
       <h3 class="binCard__name">${m.name}</h3>
-      <p class="binCard__count">${s.collected} items collected</p>
-      ${capBlock(s, live, full)}
+      <p class="binCard__count" data-f="count"></p>
+      <div class="cap">
+        <div class="cap__head">
+          <span class="cap__k">Capacity</span>
+          <span class="cap__v" data-f="cap"></span>
+        </div>
+        <div class="cap__track"><div class="cap__fill" data-f="fill"></div></div>
+      </div>
       <button class="binCard__circuit" data-goto="circuit" type="button">View circuit</button>`;
     el.binCards.append(card);
   }
+}
+
+function renderBinCards() {
+  if (!el.binCards) return;
+  if (el.binCards.children.length !== BINS.length) buildBinCards();
+
+  BINS.forEach((binClass, i) => {
+    const card = el.binCards.children[i];
+    if (!card) return;
+    const { s, seen, stale, live, full } = binView(binClass);
+
+    card.classList.toggle('binCard--stale', stale || !seen);
+    card.classList.toggle('binCard--full', full);
+
+    // Only touch the DOM when the value actually changed, so an unchanged card
+    // is left completely alone between ticks.
+    const put = (field, value) => {
+      const n = card.querySelector(`[data-f="${field}"]`);
+      if (n && n.textContent !== value) n.textContent = value;
+    };
+    put('count', `${s.collected} items collected`);
+    put('cap', live ? `${s.fill}%` : '—');
+
+    const bar = card.querySelector('[data-f="fill"]');
+    const width = `${live ? s.fill : 0}%`;
+    if (bar && bar.style.width !== width) bar.style.width = width;
+  });
+
   updateHeader();
 }
 
