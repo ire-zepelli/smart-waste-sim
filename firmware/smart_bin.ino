@@ -238,8 +238,8 @@ void publishEvent(Bin& b, const char* event, const char* reason) {
 
 /* ── admission control ──────────────────────────────────────────────────── */
 
-void admit(Bin& b) {
-  Serial.printf("[%s] ACCEPT - unlocking lid\n", b.key);
+void admit(Bin& b, const char* reason) {
+  Serial.printf("[%s] ACCEPT%s - unlocking lid\n", b.key, reason ? " (override)" : "");
   digitalWrite(b.ledGreen, HIGH);
   digitalWrite(b.ledRed, LOW);
   b.lock.write(LID_OPEN_DEG);
@@ -248,9 +248,8 @@ void admit(Bin& b) {
   // the item is now inside, so the bin is that much fuller
   b.depositPct = constrain(b.depositPct + DEPOSIT_PCT_PER_ITEM, 0, 100);
   measure(b);
-  Serial.printf("[%s] now %d%% full
-", b.key, b.fillPct);
-  publishEvent(b, "ACCEPT", nullptr);
+  Serial.printf("[%s] now %d%% full\n", b.key, b.fillPct);
+  publishEvent(b, "ACCEPT", reason);
   publishTelemetry(b);
   showIdle(b);
 }
@@ -261,18 +260,27 @@ void reject(Bin& b, const char* reason) {
   flash(b, false, 1500);
 }
 
-/** The decision from the flowchart, applied to one presented item. */
-void present(int binIdx, const char* itemClass, float confidence) {
+/** The decision from the flowchart, applied to one presented item.
+ *
+ *  isOverride means a human forced this through the manual control after the
+ *  classifier refused a correct item. It bypasses the class and confidence
+ *  checks but NOT the full check - a full bin physically cannot take more - and
+ *  it is published with reason "manual_override" so telemetry can tell a human
+ *  decision apart from a confident model one. Without that distinction the
+ *  override rate is unmeasurable and the accuracy figures are meaningless.
+ */
+void present(int binIdx, const char* itemClass, float confidence, bool isOverride) {
   if (binIdx < 0 || binIdx >= BIN_COUNT) return;
   Bin& b = bins[binIdx];
 
   Serial.printf("[%s] item=%s conf=%.2f\n", b.key, itemClass, confidence);
 
   if (b.isFull)                             { reject(b, "bin_full");        return; }
+  if (isOverride) {                         admit(b, "manual_override");    return; }
   if (!strcmp(itemClass, "NO_MATCH"))       { reject(b, "no_item");         return; }
   if (confidence < CONFIDENCE_MIN)          { reject(b, "low_confidence");  return; }
   if (strcmp(itemClass, b.category) != 0)   { reject(b, "class_mismatch");  return; }
-  admit(b);
+  admit(b, nullptr);
 }
 
 /* ── MQTT ───────────────────────────────────────────────────────────────── */
@@ -289,6 +297,8 @@ void onMessage(char* topic, byte* payload, unsigned int len) {
   float conf         = doc["confidence"] | 0.0f;
   unsigned long ts   = doc["ts"] | 0UL;
   const char* item   = doc["item"] | "";
+  const char* source = doc["source"] | "";
+  bool isOverride    = (doc["override"] | false) || !strcmp(source, "manual");
 
   if (strlen(item)) Serial.printf("   seen: %s\n", item);
 
@@ -312,7 +322,7 @@ void onMessage(char* topic, byte* payload, unsigned int len) {
     Serial.printf("!! unknown target bin \"%s\"\n", target);
     return;
   }
-  present(idx, cls, conf);
+  present(idx, cls, conf, isOverride);
 }
 
 void ensureMqtt() {
@@ -352,7 +362,7 @@ void pollButtons() {
   if (lastBtnItem == HIGH && bItem == LOW) {
     const char* cls = bins[nextItem].category;
     Serial.printf("\n>> presenting %s to the %s bin\n", cls, bins[activeBin].key);
-    present(activeBin, cls, 1.0f);
+    present(activeBin, cls, 1.0f, false);
     nextItem = (nextItem + 1) % BIN_COUNT;
     Serial.printf(">> next item will be: %s\n", bins[nextItem].category);
     delay(120);

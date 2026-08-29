@@ -108,6 +108,8 @@ const STABLE_MS = 1500;
 const COOLDOWN_MS = 3000;
 const STALE_MS = 15000;   // no telemetry for this long => grey the bin out
 const LID_OPEN_MS = 2000; // mirrors the firmware's lid dwell
+const MAX_SCAN_ATTEMPTS = 3;  // retries before a rejection is reported
+const RETRY_GAP_MS = 350;     // spacing between retries, to be kind to rate limits
 
 const $ = (s) => document.querySelector(s);
 const el = {
@@ -149,6 +151,7 @@ const state = {
     fill: null, gas: null, status: null, lastSeen: 0,
     event: null, reason: null, eventAt: 0, lidOpenUntil: 0,
     collected: 0,   // ACCEPT events seen this session
+    overridden: 0,  // of those, admitted by human override
   }])),
 };
 
@@ -611,7 +614,37 @@ async function classifyOnce(note) {
   renderVerdict();
 
   try {
-    state.latest = await state.classifier.predict(el.cam);
+    /* Retry before rejecting.
+     *
+     * Most NO_MATCH results are lighting, angle or motion blur rather than a
+     * genuinely unclassifiable item, and refusing a correct item is the
+     * expensive failure: a bin that rejects too often gets bypassed and the
+     * waste ends up beside it. So take up to MAX_SCAN_ATTEMPTS shots and keep
+     * the most confident one, stopping the moment a usable answer arrives.
+     *
+     * Lowering CONFIDENCE_MIN would be the wrong fix - it buys fewer false
+     * rejects by admitting contamination, which is the thing this system
+     * exists to prevent.
+     */
+    let best = null;
+    for (let attempt = 1; attempt <= MAX_SCAN_ATTEMPTS; attempt++) {
+      if (el.present && attempt > 1) el.present.textContent = `Scanning… ${attempt}/${MAX_SCAN_ATTEMPTS}`;
+      let shot;
+      try {
+        shot = await state.classifier.predict(el.cam);
+      } catch (e) {
+        // A rate limit or a rejected key will not improve on retry.
+        if (best) break;
+        throw e;
+      }
+      const top = shot[0];
+      if (!best || top.p > best[0].p) best = shot;
+      // good enough to act on: stop spending calls
+      if (top.label !== 'NO_MATCH' && top.p >= threshold()) break;
+      if (attempt < MAX_SCAN_ATTEMPTS) await new Promise((r) => setTimeout(r, RETRY_GAP_MS));
+    }
+
+    state.latest = best || [];
     renderBars();
     renderVerdict();
     publishClassification(note);
@@ -666,6 +699,26 @@ function decide() {
   }
   return { verdict: 'ACCEPT', kind: 'accept', reason: null,
            why: `${top.label} at ${(top.p * 100).toFixed(0)}% matches this bin — lid unlocks!` };
+}
+
+/* What the operator should physically DO about this verdict. "REJECTED" is not
+ * actionable; "too dark, move closer" is. On a genuine mismatch the most useful
+ * thing is to name the bin the item actually belongs in. */
+function advice(d) {
+  if (!d || !d.reason) return null;
+  const top = state.latest[0];
+  if (d.reason === 'no_item') {
+    return 'Hold one item in the middle of the frame, then scan again.';
+  }
+  if (d.reason === 'low_confidence') {
+    return 'Not sure enough to unlock. Move the item closer, hold it still, '
+         + 'and give it more light — then scan again.';
+  }
+  if (d.reason === 'class_mismatch' && top && META[top.label]) {
+    return `That looks like ${META[top.label].name.toLowerCase()}. `
+         + `Try the ${META[top.label].short} bin, or override below if this is wrong.`;
+  }
+  return null;
 }
 
 function trackStability() {
@@ -736,8 +789,10 @@ function renderVerdict() {
   // operator sees a bare ACCEPT/REJECT badge and never learns why. The model's
   // one-line reason is the most demonstrable part of the whole system.
   if (el.scanModalHint) {
-    el.scanModalHint.textContent =
-      state.scanError || state.note || d.why || 'Point camera at item to identify';
+    const tip = advice(d);
+    el.scanModalHint.textContent = state.scanError
+      || (tip ? `${state.note ? state.note + ' — ' : ''}${tip}`
+              : (state.note || d.why || 'Point camera at item to identify'));
     el.scanModalHint.classList.toggle('scanModalHint--err', !!state.scanError);
   }
 }
@@ -806,7 +861,9 @@ function renderBinCards() {
       const n = card.querySelector(`[data-f="${field}"]`);
       if (n && n.textContent !== value) n.textContent = value;
     };
-    put('count', `${s.collected} items collected`);
+    put('count', s.overridden
+      ? `${s.collected} items collected · ${s.overridden} overridden`
+      : `${s.collected} items collected`);
     put('cap', live ? `${s.fill}%` : '—');
 
     const bar = card.querySelector('[data-f="fill"]');
@@ -911,7 +968,11 @@ function onBrokerMessage(topic, buf) {
     s.reason = doc.reason ?? null;
     s.eventAt = Date.now();
     if (doc.fill != null) s.fill = doc.fill;
-    if (doc.event === 'ACCEPT') { s.lidOpenUntil = Date.now() + LID_OPEN_MS; s.collected++; }
+    if (doc.event === 'ACCEPT') {
+      s.lidOpenUntil = Date.now() + LID_OPEN_MS;
+      s.collected++;
+      if (doc.reason === 'manual_override') s.overridden++;
+    }
     if (doc.event === 'FULL') s.status = 'FULL';
     log(`${BY_KEY[key]} ${doc.event}${doc.reason ? ' (' + doc.reason + ')' : ''}`,
         doc.event === 'ACCEPT' ? 'ok' : doc.event ? 'err' : undefined);
@@ -978,9 +1039,11 @@ function publishClassification(note) {
 
 function publishManual(label) {
   if (!state.targetBin) { log('Open a bin first', 'err'); return; }
+  // source:'manual' tells the firmware a human forced this, so it is admitted
+  // and published as an override rather than laundered as a model decision.
   publish({
     class: label, confidence: 1, target: SHORT[state.targetBin],
-    source: 'manual', ts: Math.floor(Date.now() / 1000),
+    source: 'manual', override: true, ts: Math.floor(Date.now() / 1000),
   }, 'manual override');
 }
 
