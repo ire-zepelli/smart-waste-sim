@@ -525,3 +525,26 @@ body{
 /* an error in the scan modal must be readable where the operator is looking,
    not only in the MQTT log on the Circuit tab */
 .scanModalHint--err{color:var(--bad); font-weight:600}
+
+/* ── wokwi simulator tab ────────────────────────────────── */
+.simHead{display:flex; justify-content:space-between; align-items:flex-start;
+         gap:1rem; flex-wrap:wrap}
+.simControls{display:flex; gap:.8rem; align-items:flex-end; flex-wrap:wrap}
+.simControls label{display:flex; flex-direction:column; gap:.28rem;
+  font-family:var(--mono); font-size:.66rem; text-transform:uppercase;
+  letter-spacing:.1em; color:var(--muted-2); font-weight:700}
+.simControls .btn{text-decoration:none; display:inline-flex; align-items:center}
+
+.simFrameWrap{position:relative; flex:1; min-height:640px;
+  border:1px solid var(--line); border-radius:14px; overflow:hidden;
+  background:var(--panel)}
+.simFrame{position:relative; z-index:1; display:block; width:100%;
+  height:100%; min-height:640px; border:0; background:#1a1a1a}
+/* sits behind the frame: visible only if the frame fails to paint */
+.simFallback{position:absolute; inset:0; z-index:0; display:flex;
+  flex-direction:column; justify-content:center; gap:.7rem;
+  padding:2.5rem; max-width:44rem; margin:0 auto; text-align:center;
+  color:var(--muted); font-size:.88rem}
+.simFallback__title{margin:0; font-weight:700; color:var(--ink); font-size:1rem}
+.simFallback p{margin:0; line-height:1.6}
+.simFallback__note{font-family:var(--mono); font-size:.76rem; color:var(--muted-2)}

@@ -33,6 +33,7 @@
     <nav class="tabs" role="tablist">
       <button class="tab tab--on" data-view="station" role="tab" aria-selected="true">Bins</button>
       <button class="tab" data-view="circuit" role="tab" aria-selected="false">Circuit</button>
+      <button class="tab" data-view="simulator" role="tab" aria-selected="false">Simulator</button>
     </nav>
 
     <div class="meta">
@@ -168,6 +169,45 @@
         <button id="clearLog" class="btn btn--sm">Clear</button>
       </div>
       <ol id="log" class="log" aria-live="polite"></ol>
+    </div>
+  </section>
+
+  <!-- ══ simulator ═════════════════════════════════════════════════════════ -->
+  <section id="view-simulator" class="view" hidden>
+    <div class="simHead">
+      <div>
+        <h2 class="circuitTitle">Wokwi simulator</h2>
+        <p class="circuitSub">
+          The board and this page are not linked through the frame — both talk to
+          the MQTT broker independently. Embedding only puts them on one screen.
+        </p>
+      </div>
+      <div class="simControls">
+        <label>Project ID
+          <input id="cfgWokwiId" class="input input--m" value="473616101653662721">
+        </label>
+        <a id="wokwiOpen" class="btn btn--sm" target="_blank" rel="noopener"
+           href="https://wokwi.com/projects/473616101653662721">Open in new tab ↗</a>
+      </div>
+    </div>
+
+    <div class="simFrameWrap">
+      <div class="simFallback">
+        <p class="simFallback__title">If nothing appears below…</p>
+        <p>
+          Wokwi may refuse to be framed, or the embedded simulator may not get
+          network access. Either way, use <strong>Open in new tab</strong> — a
+          separate tab works identically, because the link between the board and
+          this page is the MQTT broker, not the frame.
+        </p>
+        <p class="simFallback__note">
+          Press play in Wokwi. Once the serial monitor shows the broker
+          connection, the Bins and Circuit tabs here come alive.
+        </p>
+      </div>
+      <iframe id="wokwiFrame" class="simFrame" title="Wokwi ESP32 simulator"
+              src="https://wokwi.com/projects/473616101653662721"
+              allow="clipboard-write; serial" referrerpolicy="no-referrer"></iframe>
     </div>
   </section>
 

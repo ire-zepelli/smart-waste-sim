@@ -123,6 +123,7 @@ const el = {
   scanModalSub: $('#scanModalSub'), closeScanModal: $('#closeScanModal'),
   scanStatusBadge: $('#scanStatusBadge'), scanModalHint: $('#scanModalHint'),
   schematic: $('#schematic'),
+  cfgWokwiId: $('#cfgWokwiId'), wokwiFrame: $('#wokwiFrame'), wokwiOpen: $('#wokwiOpen'),
   totalSorted: $('#totalSorted'), statusDot: $('#statusDot'),
   helpBtn: $('#helpBtn'), helpPanel: $('#helpPanel'), helpClose: $('#helpClose'),
   cfgProvider: $('#cfgProvider'), cfgKey: $('#cfgKey'), cfgGeminiModel: $('#cfgGeminiModel'),
@@ -470,7 +471,7 @@ function showView(name) {
   // The scanner is a modal overlay, not a view section, so it is not in this
   // list. Querying a #view-scanner that no longer exists threw a TypeError and
   // stopped tab switching dead.
-  for (const v of ['station', 'circuit']) {
+  for (const v of ['station', 'circuit', 'simulator']) {
     const node = $(`#view-${v}`);
     if (node) node.hidden = v !== name;
   }
@@ -1120,6 +1121,26 @@ el.binCards.addEventListener('click', (e) => {
   }
   openScanner(card.dataset.bin);
 });
+
+/* The frame and this page are independent clients of the MQTT broker; the
+ * iframe is a convenience, not a data path. If Wokwi refuses to be framed the
+ * fallback text and the new-tab link still give a working route. */
+function applyWokwiProject() {
+  const id = (el.cfgWokwiId.value || '').trim().replace(/\D/g, '');
+  if (!id) return;
+  const url = `https://wokwi.com/projects/${id}`;
+  if (el.wokwiFrame.src !== url) el.wokwiFrame.src = url;
+  el.wokwiOpen.href = url;
+  try { localStorage.setItem('swm.wokwiId', id); } catch {}
+}
+if (el.cfgWokwiId) {
+  try {
+    const saved = localStorage.getItem('swm.wokwiId');
+    if (saved) el.cfgWokwiId.value = saved;
+  } catch {}
+  el.cfgWokwiId.addEventListener('change', applyWokwiProject);
+  applyWokwiProject();
+}
 
 el.helpBtn.addEventListener('click', () => { el.helpPanel.hidden = !el.helpPanel.hidden; });
 el.helpClose.addEventListener('click', () => { el.helpPanel.hidden = true; });
