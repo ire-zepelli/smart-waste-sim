@@ -891,6 +891,13 @@ function renderBars() {
  */
 const COUNT_DEDUPE_MS = 6000;
 
+/* Must match firmware/smart_bin.ino. The controller models each admitted item
+ * as occupying this much of the bin, and calls it full at that threshold; the
+ * page mirrors the same arithmetic when no controller is reporting, so the two
+ * agree instead of telling different stories. */
+const DEPOSIT_PCT_PER_ITEM = 8;
+const FULL_THRESHOLD_PCT = 85;
+
 function countAccept(binKey, viaOverride) {
   const s = state.bins[binKey];
   if (!s) return;
@@ -994,12 +1001,22 @@ function binView(binClass) {
   const m = META[binClass];
   const s = state.bins[m.key];
   const now = Date.now();
+
   const seen = s.lastSeen > 0;
   const stale = seen && now - s.lastSeen > STALE_MS;
   const live = seen && !stale;
-  const full = live && s.status === 'FULL';
+
+  /* Telemetry is authoritative whenever it is arriving. With no controller the
+   * page falls back to the same model the firmware uses - each accepted item
+   * occupies DEPOSIT_PCT_PER_ITEM - so the capacity bar responds to sorting
+   * during a UI-only demonstration instead of sitting at a dash forever. */
+  const modelled = Math.min(100, s.collected * DEPOSIT_PCT_PER_ITEM);
+  const fill = live ? (s.fill ?? 0) : modelled;
+  const known = live || s.collected > 0;
+  const full = known && (live ? s.status === 'FULL' : fill >= FULL_THRESHOLD_PCT);
   const lidOpen = now < s.lidOpenUntil;
-  return { m, s, seen, stale, live, full, lidOpen };
+
+  return { m, s, seen, stale, live, known, fill, full, lidOpen };
 }
 
 /* The cards are built once and then patched in place.
@@ -1007,8 +1024,7 @@ function binView(binClass) {
  * They used to be rebuilt wholesale on every repaint, and renderAll runs on a
  * 500ms timer, so the card under the cursor was destroyed and recreated twice
  * a second. That restarted the hover transition from zero each time, which read
- * as a stutter. Replacing a node also drops focus and cancels :active, so the
- * keyboard ring and the button press flickered too.
+ * as a stutter. Replacing a node also drops focus and cancels :active.
  */
 function buildBinCards() {
   el.binCards.innerHTML = '';
@@ -1043,9 +1059,9 @@ function renderBinCards() {
   BINS.forEach((binClass, i) => {
     const card = el.binCards.children[i];
     if (!card) return;
-    const { s, seen, stale, live, full } = binView(binClass);
+    const { s, stale, known, fill, full } = binView(binClass);
 
-    card.classList.toggle('binCard--stale', stale || !seen);
+    card.classList.toggle('binCard--stale', stale);
     card.classList.toggle('binCard--full', full);
 
     // Only touch the DOM when the value actually changed, so an unchanged card
@@ -1057,10 +1073,10 @@ function renderBinCards() {
     put('count', s.overridden
       ? `${s.collected} items collected · ${s.overridden} overridden`
       : `${s.collected} items collected`);
-    put('cap', live ? `${s.fill}%` : '—');
+    put('cap', known ? `${fill}%` : '—');
 
     const bar = card.querySelector('[data-f="fill"]');
-    const width = `${live ? s.fill : 0}%`;
+    const width = `${known ? fill : 0}%`;
     if (bar && bar.style.width !== width) bar.style.width = width;
   });
 
@@ -1085,11 +1101,11 @@ function renderCircuitCards() {
   if (!el.circuitCards) return;   // per-bin telemetry cards were removed
   el.circuitCards.innerHTML = '';
   for (const binClass of BINS) {
-    const { m, s, seen, stale, live, full, lidOpen } = binView(binClass);
+    const { m, s, stale, live, known, fill, full, lidOpen } = binView(binClass);
     const p = PINS[m.key];
     const card = document.createElement('div');
     card.className = 'binCard binCard--static'
-      + (stale || !seen ? ' binCard--stale' : '') + (full ? ' binCard--full' : '');
+      + (stale ? ' binCard--stale' : '') + (full ? ' binCard--full' : '');
     card.dataset.tone = m.key;
     card.innerHTML = `
       <span class="binCard__icon">${m.icon}</span>
@@ -1100,7 +1116,7 @@ function renderCircuitCards() {
       </p>
       <div class="binStats">
         <div class="stat"><span class="stat__k">Fill</span>
-          <span class="stat__v ${full ? 'stat__v--bad' : ''}">${live ? s.fill + '%' : '—'}</span></div>
+          <span class="stat__v ${full ? 'stat__v--bad' : ''}">${known ? fill + '%' : '—'}</span></div>
         <div class="stat"><span class="stat__k">Gas</span>
           <span class="stat__v">${live && s.gas != null ? s.gas : '—'}</span></div>
         <div class="stat"><span class="stat__k">Lid</span>
