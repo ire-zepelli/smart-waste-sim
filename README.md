@@ -120,6 +120,27 @@ For an external view, open the
 [HiveMQ web client](https://www.hivemq.com/demos/websocket-client/) and
 subscribe to `uc-swm-4d/station01/#`.
 
+## Hosted build
+
+Live at **https://smart-waste-sim.vercel.app**, deployed from `main` on every
+push. The repository is private; the deployment URL is not, so turn on Vercel's
+Deployment Protection if that matters.
+
+`api/classify.py` and `api/status.py` replace what `serve.py` does locally -
+they hold the API key server-side so the browser never receives it. The key
+lives in the Vercel dashboard as `GROQ_API_KEY`, never in this repository.
+
+Two differences from running locally:
+
+- The broker switches to `wss://broker.hivemq.com:8884/mqtt` automatically.
+  An HTTPS page cannot open a plain `ws://` socket - Chrome blocks it as mixed
+  content and the failure is silent.
+- Correction capture is off. Vercel's filesystem is read-only apart from an
+  ephemeral `/tmp`, so samples would be accepted and discarded. `/api/status`
+  reports `samples:false` and the page hides the feature. Use `serve.bat`
+  locally to collect training samples.
+
+
 ## Layout
 
 ```
