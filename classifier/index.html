@@ -127,65 +127,20 @@
 
   <!-- ══ circuit ══════════════════════════════════════════════════════════ -->
   <section id="view-circuit" class="view" hidden>
-    <div class="circuitHead">
-      <div>
-        <h2 class="circuitTitle">Station 01 — live circuit</h2>
-        <p class="circuitSub">
-          One ESP32 drives all three bin units. Pin assignments match
-          <code>firmware/smart_bin.ino</code> exactly.
-        </p>
-      </div>
-      <div class="pills">
-        <span id="modelPill" class="pill pill--warn">model: loading…</span>
-        <span id="mqttPill" class="pill pill--warn">broker: connecting…</span>
-        <span id="stationPill" class="pill pill--warn">no telemetry yet</span>
-      </div>
-    </div>
-
-    <div class="simHead">
-      <p class="circuitSub simNote">
-        The board and this page are not linked through the frame — both talk to
-        the MQTT broker independently. Press play in Wokwi; once its serial
-        monitor shows the broker connection, the readings below come alive.
-      </p>
-      <div class="simControls">
-        <label>Project ID
-          <input id="cfgWokwiId" class="input input--m" value="473616101653662721">
-        </label>
-        <a id="wokwiOpen" class="btn btn--sm" target="_blank" rel="noopener"
-           href="https://wokwi.com/projects/473616101653662721">Open in new tab ↗</a>
-      </div>
-    </div>
-
     <div class="simFrameWrap">
       <div class="simFallback">
-        <p class="simFallback__title">If nothing appears here…</p>
+        <p class="simFallback__title">The simulator could not be embedded</p>
         <p>
-          Wokwi may refuse to be framed, or the embedded simulator may not get
-          network access. Either way use <strong>Open in new tab</strong> — a
-          separate tab works identically, because the link between the board and
-          this page is the MQTT broker, not the frame.
+          Wokwi may refuse to be framed, or the embedded board may not reach the
+          network. Open it in a tab instead — it works identically, because the
+          board and this page are linked by the MQTT broker, not by the frame.
         </p>
+        <a id="wokwiOpen" class="btn" target="_blank" rel="noopener"
+           href="https://wokwi.com/projects/473616101653662721">Open in Wokwi ↗</a>
       </div>
       <iframe id="wokwiFrame" class="simFrame" title="Wokwi ESP32 simulator"
               src="https://wokwi.com/projects/473616101653662721"
               allow="clipboard-write; serial" referrerpolicy="no-referrer"></iframe>
-    </div>
-
-    <div id="circuitCards" class="binCards"></div>
-
-    <p class="circuitFoot">
-      Shared: MQ-135 stand-in on <code>GPIO39 / VN</code> (ADC1 — ADC2 is unusable
-      while WiFi is active). Buttons on <code>GPIO27</code> change bin and
-      <code>GPIO23</code> presents an item.
-    </p>
-
-    <div class="panel">
-      <div class="logHead">
-        <h3 class="h2">MQTT traffic</h3>
-        <button id="clearLog" class="btn btn--sm">Clear</button>
-      </div>
-      <ol id="log" class="log" aria-live="polite"></ol>
     </div>
   </section>
 

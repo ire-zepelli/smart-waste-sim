@@ -155,6 +155,10 @@ const state = {
 /* ── logging ──────────────────────────────────────────────────────────── */
 
 function log(msg, kind) {
+  // The MQTT traffic panel was removed from the UI. Diagnostics still need to
+  // go somewhere findable, so they go to the browser console.
+  if (kind === 'err') console.warn('[zura]', msg); else console.log('[zura]', msg);
+  if (!el.log) return;
   const li = document.createElement('li');
   const t = document.createElement('span');
   t.className = 't';
@@ -168,6 +172,7 @@ function log(msg, kind) {
 }
 
 function pill(node, text, kind) {
+  if (!node) return;   // status pills were removed from the circuit view
   node.textContent = text;
   node.className = `pill pill--${kind}`;
 }
@@ -799,6 +804,7 @@ function updateHeader() {
 }
 
 function renderCircuitCards() {
+  if (!el.circuitCards) return;   // per-bin telemetry cards were removed
   el.circuitCards.innerHTML = '';
   for (const binClass of BINS) {
     const { m, s, seen, stale, live, full, lidOpen } = binView(binClass);
@@ -1004,7 +1010,7 @@ document.querySelectorAll('.tab').forEach((t) =>
 el.startCam.addEventListener('click', startCamera);
 if (el.stopCam) el.stopCam.addEventListener('click', stopCamera);
 if (el.camSelect) el.camSelect.addEventListener('change', () => { if (state.stream) { stopCamera(); startCamera(); } });
-el.clearLog.addEventListener('click', () => { el.log.innerHTML = ''; });
+if (el.clearLog) el.clearLog.addEventListener('click', () => { el.log.innerHTML = ''; });
 el.reconnect.addEventListener('click', connect);
 document.querySelectorAll('[data-manual]').forEach((b) =>
   b.addEventListener('click', () => publishManual(b.dataset.manual)));
