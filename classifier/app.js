@@ -140,6 +140,8 @@ const state = {
   note: null,
   scanError: null,   // surfaced in the modal, not just the hidden log
   serverKeys: {},    // providers serve.py holds a key for, from /api/status
+  samples: {},       // corrections filed per label, from /api/samples
+  sampleTotal: 0,
   busy: false,
   view: 'station',
   stableSince: 0,
@@ -1037,6 +1039,60 @@ function publishClassification(note) {
   publish(payload, note);
 }
 
+/* An override is a human correcting the model, so the frame plus the corrected
+ * label is exactly the sample a later on-device model would be fine-tuned on.
+ * This captures that pair. It SIMULATES the collection stage of the TFLite
+ * Micro / Edge Impulse path the project document specifies - nothing here
+ * trains anything, and the paper should say so.
+ *
+ * The camera frame is discarded after classification, so it has to be grabbed
+ * again here or the label would have no image attached to it. */
+async function captureCorrection(label) {
+  const live = !!(state.stream && el.cam && el.cam.readyState >= 2);
+  if (!live) { log('No frame to capture — camera is not running', 'err'); return; }
+  const top = state.latest[0];
+  try {
+    const res = await fetch('/api/sample', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        label,
+        image: captureFrame(el.cam),
+        modelSaid: top ? top.label : '',
+        confidence: top ? Number(top.p.toFixed(3)) : '',
+        target: SHORT[state.targetBin] || '',
+      }),
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      log(`Correction not saved: ${d.error || res.status}`, 'err');
+      return;
+    }
+    const d = await res.json();
+    state.samples = d.counts || state.samples;
+    state.sampleTotal = d.total ?? state.sampleTotal;
+    log(`Correction saved as ${d.saved} — ${d.total} training samples`, 'ok');
+    if (el.scanModalHint) {
+      el.scanModalHint.dataset.kind = 'accept';
+      el.scanModalHint.textContent =
+        `Saved as a ${META[label].name.toLowerCase()} training sample — ${d.total} collected`;
+    }
+  } catch (e) {
+    log(`Correction not saved: ${e.message}`, 'err');
+  }
+}
+
+async function loadSampleCounts() {
+  try {
+    const r = await fetch('/api/samples', { cache: 'no-store' });
+    if (!r.ok) return;
+    const d = await r.json();
+    state.samples = d.counts || {};
+    state.sampleTotal = d.total || 0;
+    if (d.total) log(`${d.total} training samples already collected in ${d.dir}`, 'ok');
+  } catch { /* served by something other than serve.py */ }
+}
+
 function publishManual(label) {
   if (!state.targetBin) { log('Open a bin first', 'err'); return; }
   // source:'manual' tells the firmware a human forced this, so it is admitted
@@ -1045,6 +1101,7 @@ function publishManual(label) {
     class: label, confidence: 1, target: SHORT[state.targetBin],
     source: 'manual', override: true, ts: Math.floor(Date.now() / 1000),
   }, 'manual override');
+  captureCorrection(label);
 }
 
 /* ── wiring ───────────────────────────────────────────────────────────── */
@@ -1205,6 +1262,7 @@ setInterval(renderAll, 500);
   }
   await listCameras();
   await loadServerStatus();
+  await loadSampleCounts();
   connect();
   await initModel();
 })();

@@ -5,3 +5,4 @@ classifier/model/*
 *.key
 .env
 *.env
+dataset/
