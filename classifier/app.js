@@ -61,21 +61,17 @@ const META = {
   RECYCLABLE:     {
     short: 'REC', key: 'rec', name: 'Recyclable',
     iconSvg: `<svg class="binIconSvg" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <g stroke="#000000" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M26 12L32 4L38 12"/>
-        <path d="M32 4V24C32 24 32 30 40 30H54"/>
-        <path d="M46 40L54 48L46 56"/>
-        <path d="M54 48H36C36 48 30 48 26 40L18 26"/>
-        <path d="M18 36L10 28L18 20"/>
-        <path d="M10 28H24C24 28 30 28 34 20L42 6"/>
+      <g stroke="#000000" stroke-width="11.0" fill="none"
+         stroke-linecap="round" stroke-linejoin="round">
+        <g transform="rotate(0 32 32)"><path d="M34.55 15.41 L45.82 34.94"/><path d="M40.19 38.19 L50.00 42.19 L51.45 31.69 Z" fill="#000000" stroke-linejoin="round"/></g>
+        <g transform="rotate(120 32 32)"><path d="M34.55 15.41 L45.82 34.94"/><path d="M40.19 38.19 L50.00 42.19 L51.45 31.69 Z" fill="#000000" stroke-linejoin="round"/></g>
+        <g transform="rotate(240 32 32)"><path d="M34.55 15.41 L45.82 34.94"/><path d="M40.19 38.19 L50.00 42.19 L51.45 31.69 Z" fill="#000000" stroke-linejoin="round"/></g>
       </g>
-      <g stroke="#60a5fa" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M26 12L32 4L38 12"/>
-        <path d="M32 4V24C32 24 32 30 40 30H54"/>
-        <path d="M46 40L54 48L46 56"/>
-        <path d="M54 48H36C36 48 30 48 26 40L18 26"/>
-        <path d="M18 36L10 28L18 20"/>
-        <path d="M10 28H24C24 28 30 28 34 20L42 6"/>
+      <g stroke="#38bdf8" stroke-width="6.0" fill="none"
+         stroke-linecap="round" stroke-linejoin="round">
+        <g transform="rotate(0 32 32)"><path d="M34.55 15.41 L45.82 34.94"/><path d="M40.19 38.19 L50.00 42.19 L51.45 31.69 Z" fill="#38bdf8" stroke-linejoin="round"/></g>
+        <g transform="rotate(120 32 32)"><path d="M34.55 15.41 L45.82 34.94"/><path d="M40.19 38.19 L50.00 42.19 L51.45 31.69 Z" fill="#38bdf8" stroke-linejoin="round"/></g>
+        <g transform="rotate(240 32 32)"><path d="M34.55 15.41 L45.82 34.94"/><path d="M40.19 38.19 L50.00 42.19 L51.45 31.69 Z" fill="#38bdf8" stroke-linejoin="round"/></g>
       </g>
     </svg>`,
     icon: '♻️', hint: 'Bottles, cans, clean paper, glass'
