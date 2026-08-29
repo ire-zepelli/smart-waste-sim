@@ -487,44 +487,6 @@ body{
 .scanManual summary::-webkit-details-marker{display:none}
 .scanManual .manualRow{display:flex; gap:.5rem; justify-content:center; margin-top:.7rem}
 
-/* ── circuit schematic ──────────────────────────────────── */
-.schematicWrap{
-  background:var(--panel); border:1px solid var(--line);
-  border-radius:14px; padding:1rem 1rem .8rem;
-}
-.schematic{overflow-x:auto}
-.schSvg{display:block; width:100%; min-width:900px; height:auto}
-
-.board{fill:#131a26; stroke:#2f3a4c; stroke-width:2}
-.boardChip{fill:#0a0f18; stroke:#2f3a4c; stroke-width:1.5}
-.boardTxt{fill:#e2e8f0; font:700 26px var(--font-sans); letter-spacing:.06em}
-.boardSub{fill:#5a6472; font:600 11px var(--mono); letter-spacing:.16em}
-.pad{fill:#0b0f17; stroke:#5a6472; stroke-width:2}
-.padTxt{fill:#7b8697; font:600 10px var(--mono); letter-spacing:.04em}
-
-.chip{fill:#151b26; stroke:#2f3a4c; stroke-width:1.6}
-.chipTxt{fill:#cbd5e1; font:600 11px var(--mono); letter-spacing:.06em}
-.chipSub{fill:#6b7686; font:600 10px var(--mono); letter-spacing:.08em}
-.xducer{fill:#0d131d; stroke:#3d4859; stroke-width:2}
-.binBody{fill:#0b0f17; stroke:#2f3a4c; stroke-width:1.6}
-.part rect,.part circle,.part line{transition:fill .3s, stroke .3s, opacity .3s}
-
-.schematicLegend{
-  display:flex; flex-wrap:wrap; gap:.4rem 1.1rem; align-items:center;
-  margin:.9rem 0 0; padding-top:.8rem; border-top:1px solid var(--line);
-  font-family:var(--mono); font-size:.68rem; text-transform:uppercase;
-  letter-spacing:.1em; color:var(--muted-2);
-}
-.schematicLegend span{display:flex; align-items:center; gap:.4rem}
-.sw{width:16px; height:2.5px; border-radius:2px; display:inline-block}
-.sw--sig{background:#4ade80} .sw--pwm{background:#fb923c}
-.sw--pwr{background:#f87171} .sw--gnd{background:#64748b}
-.sw--adc{background:#c084fc}
-.schematicLive{text-transform:none; letter-spacing:0; margin-left:auto; color:var(--muted-2)}
-
-/* an error in the scan modal must be readable where the operator is looking,
-   not only in the MQTT log on the Circuit tab */
-.scanModalHint--err{color:var(--bad); font-weight:600}
 
 /* ── wokwi simulator tab ────────────────────────────────── */
 .simHead{display:flex; justify-content:space-between; align-items:flex-start;
@@ -548,3 +510,5 @@ body{
 .simFallback__title{margin:0; font-weight:700; color:var(--ink); font-size:1rem}
 .simFallback p{margin:0; line-height:1.6}
 .simFallback__note{font-family:var(--mono); font-size:.76rem; color:var(--muted-2)}
+
+.simNote{max-width:62ch}
