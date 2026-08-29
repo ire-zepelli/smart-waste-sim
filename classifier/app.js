@@ -5,10 +5,14 @@
  *   scan      a modal holding that bin's camera. Classifies, publishes on MQTT.
  *   circuit   the Wokwi board itself, plus per-bin telemetry and raw traffic.
  *
- * Bin state is never simulated here. It arrives as telemetry from the ESP32 and
- * goes stale after STALE_MS rather than showing an old number as though it were
- * live. The schematic is driven by the same state, so an unpowered controller
- * shows dark LEDs and empty bins instead of a plausible-looking fiction.
+ * Fill level, gas and lock state are never invented here. They arrive as
+ * telemetry from the ESP32 and go stale after STALE_MS rather than showing an
+ * old number as though it were live.
+ *
+ * The one exception is the open/placed narration in the scan modal, which also
+ * runs on the page's own ACCEPT so the sequence plays during a UI-only
+ * demonstration. When the controller is running its ACCEPT event restarts it,
+ * re-syncing to the lid that actually moved.
  *
  * Four swappable classifiers, chosen at runtime:
  *
@@ -664,6 +668,9 @@ async function classifyOnce(note) {
     renderBars();
     renderVerdict();
     publishClassification(note);
+    if (decide().verdict === 'ACCEPT' && state.targetBin) {
+      startLidPhase(META[state.targetBin].key);
+    }
   } catch (e) {
     scanFail(e.message);
   } finally {
@@ -787,6 +794,18 @@ function renderBars() {
 /* While the controller is actually opening a lid, the modal narrates that
  * instead of repeating the classification verdict. Expires on its own, so a
  * stale phase cannot linger if no further events arrive. */
+/* Start the open -> placed narration.
+ *
+ * Fires on our own ACCEPT so the sequence plays during a UI-only demonstration,
+ * and again on the controller's ACCEPT event when Wokwi is running, which
+ * re-syncs the timing to the lid that actually moved. */
+function startLidPhase(binKey) {
+  const now = Date.now();
+  state.lidEvent = { key: binKey, opensUntil: now + LID_OPEN_MS,
+                     placedUntil: now + LID_OPEN_MS + PLACED_HOLD_MS };
+  renderVerdict();
+}
+
 function lidPhase() {
   const e = state.lidEvent;
   if (!e) return null;
@@ -1018,10 +1037,7 @@ function onBrokerMessage(topic, buf) {
       // Narrate the lid cycle the controller is actually performing, but only
       // for the bin currently on screen. Driven by the event rather than by our
       // own verdict, so the page never claims a lid opened when none did.
-      if (state.targetBin && META[state.targetBin].key === key) {
-        state.lidEvent = { key, opensUntil: now + LID_OPEN_MS,
-                           placedUntil: now + LID_OPEN_MS + PLACED_HOLD_MS };
-      }
+      if (state.targetBin && META[state.targetBin].key === key) startLidPhase(key);
     }
     if (doc.event === 'FULL') s.status = 'FULL';
     log(`${BY_KEY[key]} ${doc.event}${doc.reason ? ' (' + doc.reason + ')' : ''}`,
@@ -1156,6 +1172,7 @@ function publishManual(label) {
     class: label, confidence: 1, target: SHORT[state.targetBin],
     source: 'manual', override: true, ts: Math.floor(Date.now() / 1000),
   }, 'manual override');
+  if (state.targetBin) startLidPhase(META[state.targetBin].key);
   captureCorrection(label);
 }
 
