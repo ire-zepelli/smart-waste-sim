@@ -544,3 +544,21 @@ body{
 .scanModalHint[data-kind="reject"]{color:var(--bad); font-size:.78rem; line-height:1.5}
 .scanModalHint[data-kind="accept"]{color:var(--ok)}
 .scanModalHint[data-kind="error"]{color:var(--bad); font-weight:600}
+
+/* ── after a scan: the outcome takes the place of the camera ────────────── */
+.scanModalCard[data-state="result"] .scanViewport,
+.scanModalCard[data-state="result"] #present{display:none}
+
+.scanResult{
+  display:flex; align-items:center; justify-content:center;
+  padding:2.2rem 1rem 1.6rem;
+}
+.scanResult[hidden]{display:none}
+.scanResult__label{
+  font-family:var(--mono); font-size:1.9rem; font-weight:700;
+  letter-spacing:.08em; text-align:center; line-height:1.2;
+  color:var(--muted);
+}
+.scanResult__label[data-kind="accept"]{color:var(--ok); text-shadow:0 0 22px rgba(74,222,128,.45)}
+.scanResult__label[data-kind="reject"]{color:var(--bad); text-shadow:0 0 22px rgba(248,113,113,.45)}
+.scanResult__label[data-kind="nomatch"]{color:var(--warn); text-shadow:0 0 22px rgba(251,191,36,.45)}

@@ -98,6 +98,11 @@
 
     <!-- Action Button -->
     <div class="scanModalActions">
+      <!-- shown once a scan has produced an outcome, in place of the camera -->
+      <div id="scanResult" class="scanResult" hidden>
+        <span id="scanResultLabel" class="scanResult__label"></span>
+      </div>
+
       <button id="present" class="btnScanModal">Scan Item</button>
       <p class="scanModalHint" id="scanModalHint">Point camera at item to identify</p>
 

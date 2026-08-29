@@ -126,6 +126,7 @@ const el = {
   scanModalIcon: $('#scanModalIcon'), scanModalTitle: $('#scanModalTitle'),
   scanModalSub: $('#scanModalSub'), closeScanModal: $('#closeScanModal'),
   scanStatusBadge: $('#scanStatusBadge'), scanModalHint: $('#scanModalHint'),
+  scanResult: $('#scanResult'), scanResultLabel: $('#scanResultLabel'),
   cfgWokwiId: $('#cfgWokwiId'), wokwiFrame: $('#wokwiFrame'), wokwiOpen: $('#wokwiOpen'),
   totalSorted: $('#totalSorted'), statusDot: $('#statusDot'),
   helpBtn: $('#helpBtn'), helpPanel: $('#helpPanel'), helpClose: $('#helpClose'),
@@ -143,6 +144,7 @@ const state = {
   scanError: null,   // surfaced in the modal, not just the hidden log
   lidEvent: null,    // {key, opensUntil} - narrates the lid cycle; PLACED persists
   closeTimer: null,  // auto-close once the outcome has been shown
+  showResult: false, // outcome reached: camera and Scan Item give way to it
   serverKeys: {},    // providers serve.py holds a key for, from /api/status
   samples: {},       // corrections filed per label, from /api/samples
   sampleTotal: 0,
@@ -157,7 +159,8 @@ const state = {
   bins: Object.fromEntries(BINS.map((b) => [META[b].key, {
     fill: null, gas: null, status: null, lastSeen: 0,
     event: null, reason: null, eventAt: 0, lidOpenUntil: 0,
-    collected: 0,   // ACCEPT events seen this session
+    collected: 0,   // accepted items, persisted in localStorage
+    lastCountedAt: 0,
     overridden: 0,  // of those, admitted by human override
   }])),
 };
@@ -527,6 +530,7 @@ function openScanner(binClass) {
   state.latest = [];
   state.note = null;
   state.scanError = null;
+  state.showResult = false;
   // Say this before the first click rather than after it silently fails.
   const p = el.cfgProvider.value;
   if ((p === 'groq' || p === 'gemini') && !el.cfgKey.value.trim() && !state.serverKeys[p]) {
@@ -546,6 +550,7 @@ function openScanner(binClass) {
 }
 
 function closeScanner() {
+  state.showResult = false;
   clearTimeout(state.closeTimer);
   state.closeTimer = null;
   state.scanError = null;
@@ -674,6 +679,7 @@ async function classifyOnce(note) {
 
   state.scanError = null;
   state.lidEvent = null;
+  state.showResult = false;
   clearTimeout(state.closeTimer);
   state.closeTimer = null;
   state.busy = true;
@@ -734,6 +740,7 @@ async function classifyOnce(note) {
     if (!state.scanError) {
       const d = decide();
       if (d.verdict === 'ACCEPT' && state.targetBin) {
+        countAccept(META[state.targetBin].key, false);
         startLidPhase(META[state.targetBin].key);
         scheduleClose(LID_OPEN_MS + PLACED_MS);
       } else if (d.kind === 'reject' || d.kind === 'nomatch') {
@@ -748,6 +755,10 @@ async function classifyOnce(note) {
  * longer, because the manual override lives inside this modal and closing it
  * out from under someone who was reaching for it would be worse than waiting. */
 function scheduleClose(ms) {
+  // The camera and the button have done their job; the outcome takes the space.
+  // The stream itself stays open, because a manual override still needs a frame
+  // to file as a training sample.
+  state.showResult = true;
   clearTimeout(state.closeTimer);
   state.closeTimer = setTimeout(() => { state.closeTimer = null; closeScanner(); }, ms);
 }
@@ -869,6 +880,52 @@ function renderBars() {
  * Fires on our own ACCEPT so the sequence plays during a UI-only demonstration,
  * and again on the controller's ACCEPT event when Wokwi is running, which
  * re-syncs the timing to the lid that actually moved. */
+/* Counting an accepted item.
+ *
+ * These used to increment only on the controller's ACCEPT event, so with no
+ * ESP32 running they sat at zero forever. They now count the page's own accepts
+ * too, and persist, so a demonstration keeps its tally across a reload.
+ *
+ * Both paths can fire for one item when Wokwi is running, so a bin will not
+ * count twice inside COUNT_DEDUPE_MS.
+ */
+const COUNT_DEDUPE_MS = 6000;
+
+function countAccept(binKey, viaOverride) {
+  const s = state.bins[binKey];
+  if (!s) return;
+  const now = Date.now();
+  if (now - (s.lastCountedAt || 0) < COUNT_DEDUPE_MS) return;
+  s.lastCountedAt = now;
+  s.collected += 1;
+  if (viaOverride) s.overridden += 1;
+  saveCounts();
+  renderAll();
+}
+
+function saveCounts() {
+  try {
+    localStorage.setItem('swm.counts', JSON.stringify(
+      Object.fromEntries(BINS.map((b) => {
+        const s = state.bins[META[b].key];
+        return [META[b].key, { c: s.collected, o: s.overridden }];
+      }))));
+  } catch { /* private mode - the tally just will not survive a reload */ }
+}
+
+function loadCounts() {
+  try {
+    const raw = JSON.parse(localStorage.getItem('swm.counts') || '{}');
+    for (const b of BINS) {
+      const s = state.bins[META[b].key];
+      const v = raw[META[b].key];
+      if (!v) continue;
+      s.collected = Number(v.c) || 0;
+      s.overridden = Number(v.o) || 0;
+    }
+  } catch { /* corrupt or blocked storage - start from zero */ }
+}
+
 function startLidPhase(binKey) {
   const now = Date.now();
   state.lidEvent = { key: binKey, opensUntil: now + LID_OPEN_MS };
@@ -901,6 +958,14 @@ function renderVerdict() {
       el.verdictItem.textContent = state.note || '';
       el.verdictItem.hidden = !state.note;
     }
+  }
+  if (el.scanModalCard) {
+    el.scanModalCard.dataset.state = state.showResult ? 'result' : 'scanning';
+  }
+  if (el.scanResult) el.scanResult.hidden = !state.showResult;
+  if (el.scanResultLabel) {
+    el.scanResultLabel.textContent = state.scanError ? 'ERROR' : (phase ? phase.label : d.verdict);
+    el.scanResultLabel.dataset.kind = state.scanError ? 'reject' : (phase ? phase.kind : (d.kind || 'idle'));
   }
   if (el.scanStatusBadge) {
     el.scanStatusBadge.textContent =
@@ -1100,8 +1165,7 @@ function onBrokerMessage(topic, buf) {
     if (doc.event === 'ACCEPT') {
       const now = Date.now();
       s.lidOpenUntil = now + LID_OPEN_MS;
-      s.collected++;
-      if (doc.reason === 'manual_override') s.overridden++;
+      countAccept(key, doc.reason === 'manual_override');
       // Narrate the lid cycle the controller is actually performing, but only
       // for the bin currently on screen. Driven by the event rather than by our
       // own verdict, so the page never claims a lid opened when none did.
@@ -1240,7 +1304,10 @@ function publishManual(label) {
     class: label, confidence: 1, target: SHORT[state.targetBin],
     source: 'manual', override: true, ts: Math.floor(Date.now() / 1000),
   }, 'manual override');
-  if (state.targetBin) startLidPhase(META[state.targetBin].key);
+  if (state.targetBin) {
+    countAccept(META[state.targetBin].key, true);
+    startLidPhase(META[state.targetBin].key);
+  }
   captureCorrection(label);
 }
 
@@ -1393,6 +1460,7 @@ setInterval(renderAll, 500);
 
 (async function main() {
   restoreSettings();
+  loadCounts();
   applyProviderVisibility();
   renderBars();
   renderVerdict();
